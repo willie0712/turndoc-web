@@ -516,47 +516,58 @@ class TurnDocConverter:
         try:
             from pptx import Presentation
             from pptx.util import Inches
+            from pdf2image import convert_from_path, pdfinfo_from_path
         except ImportError:
             raise RuntimeError(
-                "缺少 python-pptx，請確認 requirements.txt。"
+                "缺少 python-pptx 或 pdf2image，請確認 requirements.txt。"
             )
 
-        images = self._pdf_to_pil_images(input_path)
-        if not images:
+        poppler_path = self._find_poppler_path()
+        kwargs = {"poppler_path": poppler_path} if poppler_path else {}
+
+        try:
+            total_pages = pdfinfo_from_path(str(input_path), **kwargs)["Pages"]
+        except Exception as error:
+            raise RuntimeError(f"PDF → PPT 失敗：{error}")
+
+        if total_pages < 1:
             raise RuntimeError("PDF 沒有可轉換的頁面。")
 
         presentation = Presentation()
         presentation.slide_width = Inches(13.333)
         presentation.slide_height = Inches(7.5)
 
-        try:
-            for image in images:
-                temp_image = self.output_dir / f"ppt_page_{uuid.uuid4().hex}.png"
-                try:
-                    image.save(temp_image, "PNG")
-                    slide = presentation.slides.add_slide(
-                        presentation.slide_layouts[6]
-                    )
-                    slide.shapes.add_picture(
-                        str(temp_image),
-                        0, 0,
-                        width=presentation.slide_width,
-                        height=presentation.slide_height,
-                    )
-                finally:
-                    try:
-                        temp_image.unlink()
-                    except Exception:
-                        pass
+        for page_number in range(1, total_pages + 1):
+            # 一次只轉一頁，避免記憶體爆掉
+            pages = convert_from_path(
+                str(input_path),
+                dpi=110,
+                first_page=page_number,
+                last_page=page_number,
+                **kwargs,
+            )
+            image = pages[0].convert("RGB")
+            temp_image = self.output_dir / f"ppt_page_{uuid.uuid4().hex}.jpg"
 
-            presentation.save(str(output_path))
-        finally:
-            for image in images:
+            try:
+                image.save(temp_image, "JPEG", quality=90)
+                slide = presentation.slides.add_slide(
+                    presentation.slide_layouts[6]
+                )
+                slide.shapes.add_picture(
+                    str(temp_image),
+                    0, 0,
+                    width=presentation.slide_width,
+                    height=presentation.slide_height,
+                )
+            finally:
+                image.close()
                 try:
-                    image.close()
+                    temp_image.unlink()
                 except Exception:
                     pass
 
+        presentation.save(str(output_path))
         return str(output_path)
 
     # =========================================================
