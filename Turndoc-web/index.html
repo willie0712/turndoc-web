@@ -1255,7 +1255,11 @@
        API
     ========================================================= */
 
-    const API_BASE = "http://127.0.0.1:8000";
+    const API_BASE =
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname === "localhost"
+            ? "http://127.0.0.1:8000"
+            : "";
 
     /* =========================================================
        Tool Data
@@ -1854,7 +1858,7 @@
 
             showError(
                 `無法完成轉換。\n\n${error.message}\n\n` +
-                "請確認 TurnDoc API 是否正在 http://127.0.0.1:8000 執行。"
+                "請稍後再試，或確認 TurnDoc API 是否正常運作。"
             );
 
             setProgress(0, "轉換失敗");
