@@ -12,3 +12,4 @@ img2pdf
 reportlab
 pandas
 aiofiles
+pdf2image
