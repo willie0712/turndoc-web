@@ -5,2123 +5,1015 @@ import json
 import subprocess
 import shutil
 import re
+import tempfile
+from pathlib import Path
 
 from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 from PIL import Image
 
-
-# ============================================================
-# 支援 HEIC 格式
-# ============================================================
-
+# HEIC 支援
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
 except ImportError:
     pass
 
-
-# ============================================================
-# PDF 轉 Word
-# ============================================================
-
+# PDF → Word
 try:
     from pdf2docx import Converter
 except ImportError:
-    pass
+    Converter = None
 
-
-# ============================================================
-# 強制 UTF-8 編碼
-# ============================================================
-
-try:
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
-except Exception:
-    pass
-
-
-# ============================================================
-# TurnDoc 轉換核心 - v1.0.3
-# ============================================================
 
 class TurnDocConverter:
+    def __init__(self, output_dir="outputs"):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def __init__(self, output_dir='./outputs'):
+        self.libreoffice_path = self._find_libreoffice_path()
 
-        self.output_dir = os.path.abspath(
-            output_dir
-        )
+        self.office_available = self._check_office()
+        self.libreoffice_available = self.libreoffice_path is not None
 
-        os.makedirs(
-            self.output_dir,
-            exist_ok=True
-        )
+        print(f"Microsoft Office available: {self.office_available}")
+        print(f"LibreOffice available: {self.libreoffice_available}")
+        print(f"LibreOffice path: {self.libreoffice_path}")
 
-        self.office_available = (
-            self._check_office()
-        )
+    # =========================================================
+    # 工具
+    # =========================================================
 
-        self.libreoffice_available = (
-            self._check_libreoffice()
-        )
+    def _get_output_path(self, input_path, suffix):
+        input_path = Path(input_path)
+        return self.output_dir / f"{input_path.stem}.{suffix}"
 
-        print(
-            f'[INFO] Microsoft Office: '
-            f'{"OK" if self.office_available else "NO"}',
-            file=sys.stderr
-        )
+    def _sanitize_filename(self, filename):
+        filename = os.path.basename(str(filename))
 
-        print(
-            f'[INFO] LibreOffice: '
-            f'{"OK" if self.libreoffice_available else "NO"}',
-            file=sys.stderr
-        )
+        # 修正可能出現的 Unicode escape
+        if re.search(r"\\u[0-9a-fA-F]{4}", filename):
+            try:
+                filename = filename.encode("utf-8").decode("unicode_escape")
+            except Exception:
+                pass
 
-        if (
-            not self.office_available
-            and not self.libreoffice_available
-        ):
+        filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+        filename = filename.strip()
 
-            print(
-                '[WARN] 找不到任何轉換引擎！',
-                file=sys.stderr
-            )
+        if not filename:
+            filename = f"file_{uuid.uuid4().hex[:8]}"
 
-    # ============================================================
+        return filename
+
+    # =========================================================
     # Microsoft Office
-    # ============================================================
+    # =========================================================
 
     def _check_office(self):
+        # Office COM 只能在 Windows 使用
+        if os.name != "nt":
+            return False
 
         try:
-
             import win32com.client
             import pythoncom
 
             pythoncom.CoInitialize()
 
-            word = win32com.client.Dispatch(
-                "Word.Application"
-            )
-
-            word.Quit()
-
-            return True
-
-        except Exception:
-
-            return False
-
-    # ============================================================
-    # LibreOffice
-    # ============================================================
-
-    def _check_libreoffice(self):
-
-        common_paths = [
-
-            r'C:\Program Files\LibreOffice\program\soffice.exe',
-
-            r'C:\Program Files (x86)\LibreOffice\program\soffice.exe'
-
-        ]
-
-        for path in common_paths:
-
-            if os.path.exists(path):
-
-                return True
-
-        try:
-
-            subprocess.run(
-                ['soffice', '--version'],
-                capture_output=True,
-                check=True
-            )
-
-            return True
-
-        except Exception:
-            pass
-
-        try:
-
-            subprocess.run(
-                ['libreoffice', '--version'],
-                capture_output=True,
-                check=True
-            )
-
-            return True
-
-        except Exception:
-            pass
-
-        return False
-
-    # ============================================================
-    # LibreOffice 路徑
-    # ============================================================
-
-    def _find_libreoffice_path(self):
-
-        common_paths = [
-
-            r'C:\Program Files\LibreOffice\program\soffice.exe',
-
-            r'C:\Program Files (x86)\LibreOffice\program\soffice.exe'
-
-        ]
-
-        for path in common_paths:
-
-            if os.path.exists(path):
-
-                return path
-
-        return 'soffice'
-
-    # ============================================================
-    # 檔名安全處理
-    # ============================================================
-
-    def _sanitize_filename(
-        self,
-        filename
-    ):
-
-        if not filename:
-
-            return 'TurnDoc_output'
-
-        try:
-
-            if (
-                '\\u' in filename
-                or 'u' in filename
-            ):
-
-                filename = re.sub(
-                    r'(?<!\\)u([0-9a-fA-F]{4})',
-                    r'\\u\1',
-                    filename
-                )
-
-                filename = filename.encode(
-                    'utf-8'
-                ).decode(
-                    'unicode_escape'
-                )
-
-        except Exception:
-
-            pass
-
-        filename = re.sub(
-            r'[<>:"/\\|?*]',
-            '',
-            filename
-        )
-
-        filename = filename.strip(
-            '. '
-        )
-
-        if not filename:
-
-            filename = 'TurnDoc_output'
-
-        return filename
-
-    # ============================================================
-    # 取得輸出路徑
-    # ============================================================
-
-    def _get_output_path(
-        self,
-        input_path,
-        ext
-    ):
-
-        base_name = os.path.splitext(
-            os.path.basename(input_path)
-        )[0]
-
-        base_name = self._sanitize_filename(
-            base_name
-        )
-
-        output_filename = (
-            f'{base_name}.{ext}'
-        )
-
-        output_path = os.path.join(
-            self.output_dir,
-            output_filename
-        )
-
-        counter = 1
-
-        while os.path.exists(
-            output_path
-        ):
-
-            output_filename = (
-                f'{base_name}_{counter}.{ext}'
-            )
-
-            output_path = os.path.join(
-                self.output_dir,
-                output_filename
-            )
-
-            counter += 1
-
-        return output_path
-
-    # ============================================================
-    # Microsoft Office 轉換
-    # ============================================================
-
-    def _convert_with_office(
-        self,
-        input_path,
-        output_format='pdf'
-    ):
-
-        import win32com.client
-        import pythoncom
-
-        pythoncom.CoInitialize()
-
-        ext = os.path.splitext(
-            input_path
-        )[1].lower()
-
-        out_ext = output_format.lower()
-
-        output_path = self._get_output_path(
-            input_path,
-            out_ext
-        )
-
-        try:
-
-            # ----------------------------------------------------
-            # Word
-            # ----------------------------------------------------
-
-            if ext in [
-                '.docx',
-                '.doc'
-            ]:
-
-                word = win32com.client.Dispatch(
-                    "Word.Application"
-                )
-
-                word.Visible = False
-
-                doc = word.Documents.Open(
-                    os.path.abspath(
-                        input_path
-                    )
-                )
-
-                doc.SaveAs(
-                    os.path.abspath(
-                        output_path
-                    ),
-                    FileFormat=(
-                        17
-                        if out_ext == 'pdf'
-                        else 16
-                    )
-                )
-
-                doc.Close()
-
-                word.Quit()
-
-            # ----------------------------------------------------
-            # Excel
-            # ----------------------------------------------------
-
-            elif ext in [
-                '.xlsx',
-                '.xls'
-            ]:
-
-                excel = win32com.client.Dispatch(
-                    "Excel.Application"
-                )
-
-                excel.Visible = False
-
-                wb = excel.Workbooks.Open(
-                    os.path.abspath(
-                        input_path
-                    )
-                )
-
-                if out_ext == 'pdf':
-
-                    wb.ExportAsFixedFormat(
-                        0,
-                        os.path.abspath(
-                            output_path
-                        )
-                    )
-
-                else:
-
-                    wb.SaveAs(
-                        os.path.abspath(
-                            output_path
-                        ),
-                        FileFormat=51
-                    )
-
-                wb.Close()
-
-                excel.Quit()
-
-            # ----------------------------------------------------
-            # PowerPoint
-            # ----------------------------------------------------
-
-            elif ext in [
-                '.pptx',
-                '.ppt'
-            ]:
-
-                powerpoint = (
-                    win32com.client.Dispatch(
-                        "PowerPoint.Application"
-                    )
-                )
-
-                powerpoint.Visible = True
-
-                ppt = (
-                    powerpoint.Presentations.Open(
-                        os.path.abspath(
-                            input_path
-                        ),
-                        WithWindow=False
-                    )
-                )
-
-                if out_ext == 'pdf':
-
-                    ppt.SaveAs(
-                        os.path.abspath(
-                            output_path
-                        ),
-                        FileFormat=32
-                    )
-
-                else:
-
-                    ppt.SaveAs(
-                        os.path.abspath(
-                            output_path
-                        ),
-                        FileFormat=24
-                    )
-
-                ppt.Close()
-
-                powerpoint.Quit()
-
-            else:
-
-                raise Exception(
-                    f'不支援的格式: {ext}'
-                )
-
-            return output_path
-
-        except Exception as e:
-
-            raise Exception(
-                f'Office 轉換失敗: {str(e)}'
-            )
-
-    # ============================================================
-    # LibreOffice 轉換
-    # ============================================================
-
-    def _convert_with_libreoffice(
-        self,
-        input_path,
-        output_format='pdf'
-    ):
-
-        soffice_path = (
-            self._find_libreoffice_path()
-        )
-
-        out_ext = (
-            output_format.lower()
-        )
-
-        temp_dir = os.path.join(
-            self.output_dir,
-            'temp_libreoffice'
-        )
-
-        os.makedirs(
-            temp_dir,
-            exist_ok=True
-        )
-
-        cmd = [
-
-            soffice_path,
-
-            '--headless',
-
-            '--convert-to',
-
-            out_ext,
-
-            '--outdir',
-
-            os.path.abspath(
-                temp_dir
-            ),
-
-            os.path.abspath(
-                input_path
-            )
-
-        ]
-
-        try:
-
-            subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding='utf-8'
-            )
-
-        except subprocess.CalledProcessError as e:
-
-            raise Exception(
-                f'LibreOffice 轉換失敗: {e.stderr}'
-            )
-
-        base_name = os.path.splitext(
-            os.path.basename(input_path)
-        )[0]
-
-        generated = os.path.join(
-            temp_dir,
-            f'{base_name}.{out_ext}'
-        )
-
-        if not os.path.exists(
-            generated
-        ):
-
-            files = [
-
-                f
-
-                for f in os.listdir(
-                    temp_dir
-                )
-
-                if f.endswith(
-                    f'.{out_ext}'
-                )
-
-            ]
-
-            if files:
-
-                generated = os.path.join(
-                    temp_dir,
-                    files[0]
-                )
-
-            else:
-
-                raise Exception(
-                    '找不到 LibreOffice 輸出檔案'
-                )
-
-        output_path = (
-            self._get_output_path(
-                input_path,
-                out_ext
-            )
-        )
-
-        shutil.copy2(
-            generated,
-            output_path
-        )
-
-        try:
-
-            shutil.rmtree(
-                temp_dir
-            )
-
-        except Exception:
-
-            pass
-
-        return output_path
-
-    # ============================================================
-    # 一般檔案轉換
-    # ============================================================
-
-    def _convert_file(
-        self,
-        input_path,
-        output_format='pdf'
-    ):
-
-        if self.office_available:
+            word = None
 
             try:
+                word = win32com.client.DispatchEx("Word.Application")
+                word.Visible = False
+                word.Quit()
+                word = None
+                return True
+            except Exception:
+                if word:
+                    try:
+                        word.Quit()
+                    except Exception:
+                        pass
+                return False
+            finally:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
 
+        except Exception:
+            return False
+
+    # =========================================================
+    # LibreOffice / soffice
+    # =========================================================
+
+    def _find_libreoffice_path(self):
+        candidates = []
+
+        # PATH
+        for command in ("soffice", "libreoffice"):
+            found = shutil.which(command)
+            if found:
+                candidates.append(found)
+
+        # Windows
+        if os.name == "nt":
+            candidates.extend([
+                r"C:\Program Files\LibreOffice\program\soffice.exe",
+                r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+            ])
+
+        # Linux / Render
+        candidates.extend([
+            "/usr/bin/soffice",
+            "/usr/local/bin/soffice",
+            "/usr/bin/libreoffice",
+            "/usr/local/bin/libreoffice",
+            "/opt/libreoffice/program/soffice",
+            "/opt/libreoffice/program/soffice.bin",
+            "/usr/lib/libreoffice/program/soffice",
+            "/usr/lib/libreoffice/program/soffice.bin",
+        ])
+
+        # 去除重複
+        checked = set()
+
+        for path in candidates:
+            if not path:
+                continue
+
+            path = str(path)
+
+            if path in checked:
+                continue
+
+            checked.add(path)
+
+            try:
+                if os.path.isfile(path) and os.access(path, os.X_OK):
+                    result = subprocess.run(
+                        [path, "--version"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=10,
+                    )
+
+                    if result.returncode == 0:
+                        return path
+
+                elif shutil.which(path):
+                    return path
+
+            except Exception:
+                continue
+
+        return None
+
+    def _check_libreoffice(self):
+        return self._find_libreoffice_path() is not None
+
+    # =========================================================
+    # LibreOffice conversion
+    # =========================================================
+
+    def _convert_with_libreoffice(self, input_path, output_format):
+        if not self.libreoffice_path:
+            raise RuntimeError(
+                "找不到 LibreOffice。\n"
+                "Render/Linux 需要安裝 LibreOffice 才能進行 Word、PowerPoint、Excel 等文件轉換。"
+            )
+
+        input_path = Path(input_path)
+
+        temp_dir = Path(
+            tempfile.mkdtemp(
+                prefix="turndoc_",
+                dir=str(self.output_dir)
+            )
+        )
+
+        try:
+            # LibreOffice 不同格式使用不同 filter
+            filters = {
+                "pdf": "pdf:writer_pdf_Export",
+                "docx": "docx:Office Open XML Text",
+                "pptx": "pptx:Impress MS PowerPoint 2007 XML",
+                "xlsx": "xlsx:Calc MS Excel 2007 XML",
+            }
+
+            convert_filter = filters.get(output_format, output_format)
+
+            command = [
+                self.libreoffice_path,
+                "--headless",
+                "--nologo",
+                "--nodefault",
+                "--nofirststartwizard",
+                "--norestore",
+                "--convert-to",
+                convert_filter,
+                "--outdir",
+                str(temp_dir),
+                str(input_path),
+            ]
+
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=180,
+            )
+
+            output_name = input_path.stem + "." + output_format
+            generated_file = temp_dir / output_name
+
+            if result.returncode != 0:
+                error = result.stderr.strip() or result.stdout.strip()
+
+                raise RuntimeError(
+                    f"LibreOffice 轉換失敗。\n{error}"
+                )
+
+            if not generated_file.exists():
+                # 有些版本輸出的檔名可能大小寫不同
+                matches = list(temp_dir.glob(f"{input_path.stem}.*"))
+
+                if matches:
+                    generated_file = matches[0]
+                else:
+                    raise RuntimeError(
+                        "LibreOffice 執行完成，但找不到輸出檔案。"
+                    )
+
+            final_path = self.output_dir / output_name
+
+            if final_path.exists():
+                final_path.unlink()
+
+            shutil.move(str(generated_file), str(final_path))
+
+            return str(final_path)
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # =========================================================
+    # Microsoft Office conversion
+    # =========================================================
+
+    def _convert_with_office(self, input_path, output_format):
+        if not self.office_available:
+            raise RuntimeError("Microsoft Office 不可用。")
+
+        try:
+            import win32com.client
+            import pythoncom
+
+            pythoncom.CoInitialize()
+
+            input_path = str(Path(input_path).resolve())
+
+            ext = Path(input_path).suffix.lower()
+            output_path = self._get_output_path(input_path, output_format)
+
+            if output_path.exists():
+                output_path.unlink()
+
+            if ext in [".doc", ".docx"]:
+                word = win32com.client.DispatchEx("Word.Application")
+
+                try:
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+
+                    document = word.Documents.Open(input_path)
+                    document.SaveAs(
+                        str(output_path),
+                        FileFormat=17
+                    )
+                    document.Close(False)
+
+                finally:
+                    word.Quit()
+
+            elif ext in [".ppt", ".pptx"]:
+                powerpoint = win32com.client.DispatchEx(
+                    "PowerPoint.Application"
+                )
+
+                try:
+                    presentation = powerpoint.Presentations.Open(
+                        input_path,
+                        WithWindow=False
+                    )
+
+                    presentation.SaveAs(
+                        str(output_path),
+                        32
+                    )
+
+                    presentation.Close()
+
+                finally:
+                    powerpoint.Quit()
+
+            elif ext in [".xls", ".xlsx"]:
+                excel = win32com.client.DispatchEx("Excel.Application")
+
+                try:
+                    excel.Visible = False
+                    excel.DisplayAlerts = False
+
+                    workbook = excel.Workbooks.Open(input_path)
+
+                    workbook.ExportAsFixedFormat(
+                        0,
+                        str(output_path)
+                    )
+
+                    workbook.Close(False)
+
+                finally:
+                    excel.Quit()
+
+            else:
+                raise RuntimeError(
+                    f"Microsoft Office 不支援此檔案格式：{ext}"
+                )
+
+            if not output_path.exists():
+                raise RuntimeError("Office 沒有產生輸出檔案。")
+
+            return str(output_path)
+
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+    # =========================================================
+    # 通用文件轉換
+    # =========================================================
+
+    def _convert_file(self, input_path, output_format):
+        input_path = Path(input_path)
+
+        # Windows + Microsoft Office
+        if self.office_available and os.name == "nt":
+            try:
                 return self._convert_with_office(
                     input_path,
                     output_format
                 )
-
-            except Exception as e:
-
+            except Exception as office_error:
                 print(
-                    f'[WARN] Office 轉換失敗: {e}，'
-                    f'嘗試切換 LibreOffice...',
-                    file=sys.stderr
+                    f"Microsoft Office conversion failed: {office_error}"
                 )
 
+        # LibreOffice
         if self.libreoffice_available:
-
             return self._convert_with_libreoffice(
                 input_path,
                 output_format
             )
 
-        raise Exception(
-            '找不到可用的轉換引擎！'
-            '請確認是否已安裝 Microsoft Office 或 LibreOffice。'
+        raise RuntimeError(
+            "找不到可用的轉換引擎！\n\n"
+            "目前環境沒有 Microsoft Office 或 LibreOffice。\n"
+            "如果這是在 Render 上執行，請確認服務環境已安裝 LibreOffice。"
         )
 
-    # ============================================================
+    # =========================================================
     # Word → PDF
-    # ============================================================
+    # =========================================================
 
-    def word_to_pdf(
-        self,
-        input_path
-    ):
+    def word_to_pdf(self, input_path):
+        return self._convert_file(input_path, "pdf")
 
-        return self._convert_file(
-            input_path,
-            'pdf'
-        )
-
-    # ============================================================
+    # =========================================================
     # PDF → Word
-    # ============================================================
+    # =========================================================
 
-    def pdf_to_word(
-        self,
-        input_path
-    ):
+    def pdf_to_word(self, input_path):
+        if Converter is None:
+            raise RuntimeError(
+                "找不到 pdf2docx 套件，請確認 requirements.txt 已安裝 pdf2docx。"
+            )
+
+        input_path = Path(input_path)
+        output_path = self._get_output_path(input_path, "docx")
+
+        if output_path.exists():
+            output_path.unlink()
+
+        converter = None
 
         try:
+            converter = Converter(str(input_path))
+            converter.convert(str(output_path))
+        finally:
+            if converter:
+                converter.close()
 
-            output_path = self._get_output_path(
-                input_path,
-                'docx'
-            )
+        if not output_path.exists():
+            raise RuntimeError("PDF → Word 轉換失敗。")
 
-            cv = Converter(
-                input_path
-            )
+        return str(output_path)
 
-            cv.convert(
-                output_path,
-                start=0,
-                end=None
-            )
-
-            cv.close()
-
-            return output_path
-
-        except Exception as e:
-
-            raise Exception(
-                f'PDF 轉 Word 失敗: {str(e)}'
-            )
-
-    # ============================================================
+    # =========================================================
     # PowerPoint → PDF
-    # ============================================================
+    # =========================================================
 
-    def ppt_to_pdf(
-        self,
-        input_path
-    ):
+    def ppt_to_pdf(self, input_path):
+        return self._convert_file(input_path, "pdf")
 
-        return self._convert_file(
-            input_path,
-            'pdf'
-        )
-
-    # ============================================================
+    # =========================================================
     # Excel → PDF
-    # ============================================================
+    # =========================================================
 
-    def excel_to_pdf(
-        self,
-        input_path
-    ):
+    def excel_to_pdf(self, input_path):
+        return self._convert_file(input_path, "pdf")
 
-        return self._convert_file(
-            input_path,
-            'pdf'
-        )
-
-    # ============================================================
+    # =========================================================
     # PDF → PowerPoint
-    # ============================================================
+    # =========================================================
 
-    def pdf_to_ppt(
-        self,
-        input_path
-    ):
+    def pdf_to_ppt(self, input_path):
+        input_path = Path(input_path)
+        output_path = self._get_output_path(input_path, "pptx")
 
-        return self._convert_file(
-            input_path,
-            'pptx'
-        )
-
-    # ============================================================
-    # PDF → Excel
-    # ============================================================
-
-    def pdf_to_excel(
-        self,
-        input_path
-    ):
-
-        return self._convert_file(
-            input_path,
-            'xlsx'
-        )
-
-    # ============================================================
-    # 合併 PDF
-    # ============================================================
-
-    def merge_pdfs(
-        self,
-        input_paths
-    ):
-
-        if not input_paths:
-
-            raise Exception(
-                '合併列表不能為空'
+        # PDF 不是 LibreOffice Impress 的一般輸入格式，
+        # 因此這裡使用圖片方式建立 PPTX。
+        try:
+            from pdf2image import convert_from_path
+        except ImportError:
+            raise RuntimeError(
+                "缺少 pdf2image，請確認 requirements.txt。"
             )
 
-        output_path = (
-            self._get_output_path(
-                input_paths[0],
-                'pdf'
+        try:
+            from pptx import Presentation
+            from pptx.util import Inches
+        except ImportError:
+            raise RuntimeError(
+                "缺少 python-pptx，請確認 requirements.txt。"
             )
-        )
 
-        if not output_path.endswith(
-            '_merged.pdf'
-        ):
+        images = self._pdf_to_pil_images(input_path)
 
-            output_path = (
-                output_path.replace(
-                    '.pdf',
-                    '_merged.pdf'
+        if not images:
+            raise RuntimeError("PDF 沒有可轉換的頁面。")
+
+        presentation = Presentation()
+        presentation.slide_width = Inches(13.333)
+        presentation.slide_height = Inches(7.5)
+
+        for image in images:
+            temp_image = self.output_dir / (
+                f"ppt_page_{uuid.uuid4().hex}.png"
+            )
+
+            try:
+                image.save(temp_image, "PNG")
+
+                slide = presentation.slides.add_slide(
+                    presentation.slide_layouts[6]
                 )
+
+                slide.shapes.add_picture(
+                    str(temp_image),
+                    0,
+                    0,
+                    width=presentation.slide_width,
+                    height=presentation.slide_height,
+                )
+
+            finally:
+                try:
+                    temp_image.unlink()
+                except Exception:
+                    pass
+
+        presentation.save(output_path)
+
+        return str(output_path)
+
+    # =========================================================
+    # PDF → Excel
+    # =========================================================
+
+    def pdf_to_excel(self, input_path):
+        try:
+            import pdfplumber
+        except ImportError:
+            raise RuntimeError(
+                "缺少 pdfplumber，請確認 requirements.txt。"
             )
+
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            raise RuntimeError(
+                "缺少 openpyxl，請確認 requirements.txt。"
+            )
+
+        input_path = Path(input_path)
+        output_path = self._get_output_path(input_path, "xlsx")
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "PDF"
+
+        row_number = 1
+
+        with pdfplumber.open(str(input_path)) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+
+                if tables:
+                    for table in tables:
+                        for row in table:
+                            if row:
+                                for col_number, value in enumerate(
+                                    row,
+                                    start=1
+                                ):
+                                    worksheet.cell(
+                                        row=row_number,
+                                        column=col_number,
+                                        value=value
+                                    )
+
+                                row_number += 1
+
+                        row_number += 1
+
+                else:
+                    text = page.extract_text()
+
+                    if text:
+                        for line in text.splitlines():
+                            worksheet.cell(
+                                row=row_number,
+                                column=1,
+                                value=line
+                            )
+                            row_number += 1
+
+        workbook.save(output_path)
+
+        return str(output_path)
+
+    # =========================================================
+    # PDF 合併
+    # =========================================================
+
+    def merge_pdfs(self, input_paths):
+        if not input_paths:
+            raise RuntimeError("沒有 PDF 可以合併。")
+
+        output_path = self.output_dir / (
+            f"merged_{uuid.uuid4().hex[:8]}.pdf"
+        )
 
         merger = PdfMerger()
 
         try:
-
             for path in input_paths:
+                merger.append(str(path))
 
-                merger.append(
-                    path
-                )
-
-            merger.write(
-                output_path
-            )
+            merger.write(str(output_path))
 
         finally:
-
             merger.close()
 
-        return output_path
+        return str(output_path)
 
-    # ============================================================
+    # =========================================================
     # PDF 壓縮
-    #
-    # 核心規則：
-    #
-    # 1. 嘗試 PyPDF2
-    # 2. 嘗試 Ghostscript
-    # 3. 比較所有結果
-    # 4. 只有比原始檔更小才使用
-    # 5. 如果全部都變大 → 保留原始 PDF
-    # ============================================================
+    # =========================================================
 
-    def compress_pdf(
-        self,
-        input_path,
-        quality=80
-    ):
-
-        input_path = os.path.abspath(
-            input_path
+    def compress_pdf(self, input_path, quality="medium"):
+        input_path = Path(input_path)
+        output_path = self._get_output_path(
+            input_path,
+            "compressed.pdf"
         )
 
-        if not os.path.exists(
-            input_path
-        ):
+        ghostscript = self._find_ghostscript()
 
-            raise Exception(
-                f'找不到輸入 PDF: {input_path}'
+        if ghostscript:
+            quality_map = {
+                "low": "/screen",
+                "medium": "/ebook",
+                "high": "/printer",
+            }
+
+            pdf_quality = quality_map.get(
+                quality,
+                "/ebook"
             )
 
-        os.makedirs(
-            self.output_dir,
-            exist_ok=True
-        )
+            command = [
+                ghostscript,
+                "-sDEVICE=pdfwrite",
+                "-dCompatibilityLevel=1.4",
+                f"-dPDFSETTINGS={pdf_quality}",
+                "-dNOPAUSE",
+                "-dQUIET",
+                "-dBATCH",
+                f"-sOutputFile={output_path}",
+                str(input_path),
+            ]
 
-        base_name = os.path.splitext(
-            os.path.basename(input_path)
-        )[0]
-
-        base_name = self._sanitize_filename(
-            base_name
-        )
-
-        # --------------------------------------------------------
-        # 原始大小
-        # --------------------------------------------------------
-
-        original_size = os.path.getsize(
-            input_path
-        )
-
-        # --------------------------------------------------------
-        # 最終輸出檔
-        # --------------------------------------------------------
-
-        output_path = os.path.join(
-            self.output_dir,
-            f'{base_name}_compressed.pdf'
-        )
-
-        counter = 1
-
-        while os.path.exists(
-            output_path
-        ):
-
-            output_path = os.path.join(
-                self.output_dir,
-                f'{base_name}_compressed_{counter}.pdf'
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=180,
             )
 
-            counter += 1
+            if result.returncode == 0 and output_path.exists():
+                return str(output_path)
 
-        # --------------------------------------------------------
-        # 暫存檔
-        # --------------------------------------------------------
+        # 沒有 Ghostscript 時使用 PyPDF2 重寫 PDF
+        reader = PdfReader(str(input_path))
+        writer = PdfWriter()
 
-        temp_pypdf = os.path.join(
-            self.output_dir,
-            f'.{uuid.uuid4().hex}_pypdf.pdf'
-        )
+        for page in reader.pages:
+            writer.add_page(page)
 
-        temp_gs = os.path.join(
-            self.output_dir,
-            f'.{uuid.uuid4().hex}_gs.pdf'
-        )
+        with open(output_path, "wb") as file:
+            writer.write(file)
 
-        candidates = []
+        return str(output_path)
+
+    def _find_ghostscript(self):
+        commands = [
+            "gs",
+            "gswin64c",
+            "gswin32c",
+        ]
+
+        for command in commands:
+            found = shutil.which(command)
+
+            if found:
+                return found
+
+        windows_paths = [
+            r"C:\Program Files\gs\gs*\bin\gswin64c.exe",
+            r"C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe",
+        ]
+
+        import glob
+
+        for pattern in windows_paths:
+            matches = glob.glob(pattern)
+
+            if matches:
+                return matches[-1]
+
+        return None
+
+    # =========================================================
+    # PDF → 圖片
+    # =========================================================
+
+    def _find_poppler_path(self):
+        # Linux / Render：優先使用 PATH
+        if os.name != "nt":
+            if shutil.which("pdftoppm"):
+                return None
+            return None
+
+        base_dir = Path(__file__).resolve().parent
+
+        candidates = [
+            base_dir / "poppler" / "bin",
+            base_dir.parent / "poppler" / "bin",
+            Path.cwd() / "poppler" / "bin",
+            Path(r"C:\poppler\bin"),
+        ]
+
+        for path in candidates:
+            if (path / "pdftoppm.exe").exists():
+                return str(path)
+
+        if shutil.which("pdftoppm"):
+            return None
+
+        return None
+
+    def _pdf_to_pil_images(self, input_path):
+        try:
+            from pdf2image import convert_from_path
+        except ImportError:
+            raise RuntimeError(
+                "缺少 pdf2image，請確認 requirements.txt 已安裝。"
+            )
+
+        poppler_path = self._find_poppler_path()
 
         try:
-
-            # ====================================================
-            # 1. PyPDF2
-            # ====================================================
-
-            try:
-
-                reader = PdfReader(
-                    input_path
+            if poppler_path:
+                return convert_from_path(
+                    str(input_path),
+                    poppler_path=poppler_path
                 )
 
-                writer = PdfWriter()
+            return convert_from_path(str(input_path))
 
-                for page in reader.pages:
-
-                    try:
-
-                        page.compress_content_streams()
-
-                    except Exception:
-
-                        pass
-
-                    writer.add_page(
-                        page
-                    )
-
-                try:
-
-                    writer._compress = True
-
-                except Exception:
-
-                    pass
-
-                with open(
-                    temp_pypdf,
-                    'wb'
-                ) as output_file:
-
-                    writer.write(
-                        output_file
-                    )
-
-                if os.path.exists(
-                    temp_pypdf
-                ):
-
-                    pypdf_size = os.path.getsize(
-                        temp_pypdf
-                    )
-
-                    if pypdf_size > 0:
-
-                        candidates.append(
-                            (
-                                pypdf_size,
-                                temp_pypdf,
-                                'PyPDF2'
-                            )
-                        )
-
-            except Exception as e:
-
-                print(
-                    f'[WARN] PyPDF2 壓縮失敗: {e}',
-                    file=sys.stderr
-                )
-
-            # ====================================================
-            # 2. Ghostscript
-            # ====================================================
-
-            try:
-
-                quality = int(
-                    quality
-                )
-
-            except Exception:
-
-                quality = 80
-
-            quality = max(
-                1,
-                min(
-                    100,
-                    quality
-                )
+        except Exception as error:
+            raise RuntimeError(
+                "PDF → 圖片失敗。\n\n"
+                "系統需要 Poppler / pdftoppm。\n"
+                f"{error}"
             )
-
-            gs_path = None
-
-            possible_commands = [
-
-                'gswin64c',
-
-                'gswin32c',
-
-                'gs'
-
-            ]
-
-            for command in possible_commands:
-
-                found = shutil.which(
-                    command
-                )
-
-                if found:
-
-                    gs_path = found
-
-                    break
-
-            # ----------------------------------------------------
-            # Windows Ghostscript 常見路徑
-            # ----------------------------------------------------
-
-            if (
-                not gs_path
-                and os.name == 'nt'
-            ):
-
-                import glob
-
-                possible_patterns = [
-
-                    r'C:\Program Files\gs\gs*\bin\gswin64c.exe',
-
-                    r'C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe'
-
-                ]
-
-                for pattern in possible_patterns:
-
-                    matches = glob.glob(
-                        pattern
-                    )
-
-                    if matches:
-
-                        matches.sort(
-                            reverse=True
-                        )
-
-                        gs_path = matches[0]
-
-                        break
-
-            # ----------------------------------------------------
-            # Ghostscript 找得到
-            # ----------------------------------------------------
-
-            if gs_path:
-
-                if quality < 30:
-
-                    pdf_settings = (
-                        '/screen'
-                    )
-
-                elif quality < 60:
-
-                    pdf_settings = (
-                        '/ebook'
-                    )
-
-                else:
-
-                    pdf_settings = (
-                        '/prepress'
-                    )
-
-                gs_cmd = [
-
-                    gs_path,
-
-                    '-sDEVICE=pdfwrite',
-
-                    '-dCompatibilityLevel=1.4',
-
-                    f'-dPDFSETTINGS={pdf_settings}',
-
-                    '-dNOPAUSE',
-
-                    '-dQUIET',
-
-                    '-dBATCH',
-
-                    f'-sOutputFile={temp_gs}',
-
-                    input_path
-
-                ]
-
-                result = subprocess.run(
-
-                    gs_cmd,
-
-                    check=False,
-
-                    capture_output=True,
-
-                    text=True,
-
-                    encoding='utf-8',
-
-                    errors='replace'
-
-                )
-
-                if (
-                    result.returncode == 0
-                    and os.path.exists(
-                        temp_gs
-                    )
-                ):
-
-                    gs_size = os.path.getsize(
-                        temp_gs
-                    )
-
-                    if gs_size > 0:
-
-                        candidates.append(
-                            (
-                                gs_size,
-                                temp_gs,
-                                'Ghostscript'
-                            )
-                        )
-
-                else:
-
-                    print(
-                        '[WARN] Ghostscript 壓縮失敗',
-                        file=sys.stderr
-                    )
-
-            else:
-
-                print(
-                    '[INFO] 找不到 Ghostscript，'
-                    '只使用 PyPDF2。',
-                    file=sys.stderr
-                )
-
-            # ====================================================
-            # 3. 找出比原始檔更小的結果
-            # ====================================================
-
-            smaller_candidates = [
-
-                candidate
-
-                for candidate in candidates
-
-                if candidate[0] < original_size
-
-            ]
-
-            # ====================================================
-            # 4. 沒有任何版本更小
-            # ====================================================
-
-            if not smaller_candidates:
-
-                shutil.copy2(
-                    input_path,
-                    output_path
-                )
-
-                print(
-                    '[INFO] 壓縮後沒有更小，'
-                    '保留原始 PDF。',
-                    file=sys.stderr
-                )
-
-                return os.path.abspath(
-                    output_path
-                )
-
-            # ====================================================
-            # 5. 選最小的版本
-            # ====================================================
-
-            best_size, best_path, best_method = min(
-
-                smaller_candidates,
-
-                key=lambda x: x[0]
-
-            )
-
-            shutil.copy2(
-                best_path,
-                output_path
-            )
-
-            # ====================================================
-            # 6. 顯示結果
-            # ====================================================
-
-            original_mb = (
-                original_size
-                / 1024
-                / 1024
-            )
-
-            final_mb = (
-                best_size
-                / 1024
-                / 1024
-            )
-
-            saved_percent = (
-
-                (
-                    original_size
-                    - best_size
-                )
-
-                / original_size
-
-                * 100
-
-            )
-
-            print(
-                f'[INFO] PDF 壓縮完成 '
-                f'({best_method})',
-                file=sys.stderr
-            )
-
-            print(
-                f'[INFO] 原始大小: '
-                f'{original_mb:.2f} MB',
-                file=sys.stderr
-            )
-
-            print(
-                f'[INFO] 壓縮後: '
-                f'{final_mb:.2f} MB',
-                file=sys.stderr
-            )
-
-            print(
-                f'[INFO] 減少: '
-                f'{saved_percent:.1f}%',
-                file=sys.stderr
-            )
-
-            return os.path.abspath(
-                output_path
-            )
-
-        except Exception as e:
-
-            if os.path.exists(
-                output_path
-            ):
-
-                try:
-
-                    os.remove(
-                        output_path
-                    )
-
-                except Exception:
-
-                    pass
-
-            raise Exception(
-                f'PDF 壓縮失敗: {str(e)}'
-            )
-
-        finally:
-
-            # ----------------------------------------------------
-            # 清理暫存檔
-            # ----------------------------------------------------
-
-            for temp_file in [
-
-                temp_pypdf,
-
-                temp_gs
-
-            ]:
-
-                try:
-
-                    if os.path.exists(
-                        temp_file
-                    ):
-
-                        os.remove(
-                            temp_file
-                        )
-
-                except Exception:
-
-                    pass
-
-    # ============================================================
-    # PDF → 圖片
-    # ============================================================
 
     def pdf_to_images(
         self,
         input_path,
-        output_format='PNG'
+        output_format="png"
     ):
+        input_path = Path(input_path)
 
-        from pdf2image import (
-            convert_from_path
-        )
+        images = self._pdf_to_pil_images(input_path)
 
-        base_name = os.path.splitext(
-            os.path.basename(input_path)
-        )[0]
+        output_files = []
 
-        base_name = self._sanitize_filename(
-            base_name
-        )
+        output_format = output_format.lower()
 
-        # --------------------------------------------------------
-        # 找程式所在位置
-        # --------------------------------------------------------
+        if output_format not in ["png", "jpg", "jpeg", "webp"]:
+            output_format = "png"
 
-        if getattr(
-            sys,
-            'frozen',
-            False
-        ):
+        for index, image in enumerate(images, start=1):
+            extension = "jpg" if output_format == "jpeg" else output_format
 
-            base_dir = os.path.dirname(
-                os.path.abspath(
-                    sys.executable
-                )
+            output_path = self.output_dir / (
+                f"{input_path.stem}_{index}.{extension}"
             )
 
-        else:
+            if extension in ["jpg", "jpeg"]:
+                if image.mode in ["RGBA", "LA", "P"]:
+                    image = image.convert("RGB")
 
-            base_dir = os.path.dirname(
-                os.path.abspath(
-                    __file__
+                image.save(
+                    output_path,
+                    "JPEG",
+                    quality=95
                 )
-            )
-
-        # --------------------------------------------------------
-        # Poppler 搜尋路徑
-        # --------------------------------------------------------
-
-        poppler_possible_paths = [
-
-            # api/poppler/bin
-            os.path.join(
-                base_dir,
-                'poppler',
-                'bin'
-            ),
-
-            # 專案根目錄/poppler/bin
-            os.path.join(
-                os.path.dirname(
-                    base_dir
-                ),
-                'poppler',
-                'bin'
-            ),
-
-            # 目前工作目錄/poppler/bin
-            os.path.join(
-                os.getcwd(),
-                'poppler',
-                'bin'
-            ),
-
-            # 備用
-            r'C:\poppler\bin'
-
-        ]
-
-        poppler_path = None
-
-        for p in poppler_possible_paths:
-
-            exe_path = os.path.join(
-                p,
-                'pdftoppm.exe'
-            )
-
-            if os.path.exists(
-                exe_path
-            ):
-
-                poppler_path = p
-
-                break
-
-        fmt = output_format.upper()
-
-        if fmt == 'JPG':
-
-            fmt = 'JPEG'
-
-        try:
-
-            if poppler_path:
-
-                images = convert_from_path(
-
-                    input_path,
-
-                    poppler_path=poppler_path
-
-                )
-
             else:
-
-                searched_str = '\n'.join(
-                    poppler_possible_paths
+                image.save(
+                    output_path,
+                    output_format.upper()
                 )
 
-                raise Exception(
+            output_files.append(str(output_path))
 
-                    '找不到 poppler/bin/pdftoppm.exe\n'
+        return output_files
 
-                    f'已搜尋路徑:\n{searched_str}'
-
-                )
-
-        except Exception as e:
-
-            raise Exception(
-                f'無法讀取 PDF: {str(e)}'
-            )
-
-        output_paths = []
-
-        for i, img in enumerate(
-            images
-        ):
-
-            out_ext = (
-
-                'jpg'
-
-                if fmt == 'JPEG'
-
-                else fmt.lower()
-
-            )
-
-            output_filename = (
-
-                f'{base_name}_page_{i + 1}.{out_ext}'
-
-            )
-
-            output_path = os.path.join(
-
-                self.output_dir,
-
-                output_filename
-
-            )
-
-            img.save(
-                output_path,
-                fmt
-            )
-
-            output_paths.append(
-                output_path
-            )
-
-        return output_paths
-
-    # ============================================================
+    # =========================================================
     # 圖片 → PDF
-    # ============================================================
+    # =========================================================
 
-    def images_to_pdf(
-        self,
-        image_paths
-    ):
+    def images_to_pdf(self, input_paths):
+        if not input_paths:
+            raise RuntimeError("沒有圖片可以轉換。")
 
-        if not image_paths:
-
-            raise Exception(
-                '圖片列表不能為空'
-            )
-
-        output_path = (
-            self._get_output_path(
-                image_paths[0],
-                'pdf'
-            )
+        output_path = self.output_dir / (
+            f"images_{uuid.uuid4().hex[:8]}.pdf"
         )
 
         images = []
 
-        for path in image_paths:
+        for path in input_paths:
+            image = Image.open(path)
 
-            img = Image.open(
-                path
-            )
+            if image.mode != "RGB":
+                image = image.convert("RGB")
 
-            if img.mode in (
-                'RGBA',
-                'LA',
-                'P'
-            ):
+            images.append(image)
 
-                img = img.convert(
-                    'RGB'
-                )
+        if not images:
+            raise RuntimeError("沒有有效圖片。")
 
-            images.append(
-                img
-            )
+        first = images[0]
+        remaining = images[1:]
 
-        images[0].save(
-
+        first.save(
             output_path,
-
+            "PDF",
+            resolution=100.0,
             save_all=True,
-
-            append_images=images[1:]
-
+            append_images=remaining,
         )
 
-        return output_path
+        for image in images:
+            try:
+                image.close()
+            except Exception:
+                pass
 
-    # ============================================================
-    # 圖片轉換
-    # ============================================================
+        return str(output_path)
+
+    # =========================================================
+    # 圖片格式轉換
+    # =========================================================
 
     def convert_image(
         self,
         input_path,
-        output_format='PNG'
+        output_format
     ):
+        input_path = Path(input_path)
 
-        fmt = output_format.upper()
+        output_format = output_format.lower()
 
-        if fmt == 'JPG':
+        if output_format == "jpeg":
+            output_format = "jpg"
 
-            fmt = 'JPEG'
+        supported = [
+            "png",
+            "jpg",
+            "jpeg",
+            "webp",
+            "bmp",
+            "tiff",
+            "gif",
+        ]
 
-        out_ext = (
-
-            'jpg'
-
-            if fmt == 'JPEG'
-
-            else fmt.lower()
-
-        )
-
-        output_path = (
-            self._get_output_path(
-                input_path,
-                out_ext
-            )
-        )
-
-        img = Image.open(
-            input_path
-        )
-
-        if (
-            fmt == 'JPEG'
-            and img.mode in (
-                'RGBA',
-                'LA',
-                'P'
-            )
-        ):
-
-            background = Image.new(
-
-                'RGB',
-
-                img.size,
-
-                (255, 255, 255)
-
+        if output_format not in supported:
+            raise RuntimeError(
+                f"不支援的圖片格式：{output_format}"
             )
 
-            if img.mode == 'P':
+        output_path = self._get_output_path(
+            input_path,
+            output_format
+        )
 
-                img = img.convert(
-                    'RGBA'
-                )
+        image = Image.open(input_path)
 
-            if img.mode == 'RGBA':
+        try:
+            if output_format in ["jpg", "jpeg"]:
+                if image.mode in ["RGBA", "LA", "P"]:
+                    image = image.convert("RGB")
 
-                background.paste(
-
-                    img,
-
-                    mask=img.split()[-1]
-
+                image.save(
+                    output_path,
+                    "JPEG",
+                    quality=95
                 )
 
             else:
-
-                background.paste(
-                    img
+                image.save(
+                    output_path,
+                    output_format.upper()
                 )
 
-            img = background
+        finally:
+            image.close()
 
-        img.save(
+        return str(output_path)
 
-            output_path,
-
-            format=fmt
-
-        )
-
-        return output_path
-
-    # ============================================================
+    # =========================================================
     # 圖片壓縮
-    # ============================================================
+    # =========================================================
 
     def compress_image(
         self,
         input_path,
-        quality=80,
+        quality="medium",
         output_format=None
     ):
+        input_path = Path(input_path)
 
-        img = Image.open(
-            input_path
+        quality_map = {
+            "low": 45,
+            "medium": 70,
+            "high": 85,
+        }
+
+        image_quality = quality_map.get(
+            quality,
+            70
         )
 
-        orig_ext = os.path.splitext(
-            input_path
-        )[1].lower()
+        if not output_format or output_format == "original":
+            extension = input_path.suffix.lower().lstrip(".")
 
-        if orig_ext in [
-            '.heic',
-            '.heif'
-        ]:
-
-            fmt = 'JPEG'
-
+            if extension == "jpeg":
+                extension = "jpg"
         else:
+            extension = output_format.lower()
 
-            fmt = (
+        if extension == "jpeg":
+            extension = "jpg"
 
-                output_format.upper()
-
-                if output_format
-
-                else (
-
-                    img.format
-
-                    or 'JPEG'
-
-                )
-
-            )
-
-            if fmt == 'JPG':
-
-                fmt = 'JPEG'
-
-        png_compress = max(
-
-            0,
-
-            min(
-
-                9,
-
-                int(
-                    (100 - quality) / 11
-                )
-
-            )
-
+        output_path = self.output_dir / (
+            f"{input_path.stem}.compressed.{extension}"
         )
 
-        out_ext = (
+        image = Image.open(input_path)
 
-            'jpg'
+        try:
+            if extension in ["jpg", "jpeg"]:
+                if image.mode in ["RGBA", "LA", "P"]:
+                    image = image.convert("RGB")
 
-            if fmt == 'JPEG'
-
-            else fmt.lower()
-
-        )
-
-        output_path = (
-            self._get_output_path(
-                input_path,
-                f'compressed.{out_ext}'
-            )
-        )
-
-        if (
-            fmt == 'JPEG'
-            and img.mode in (
-                'RGBA',
-                'LA',
-                'P'
-            )
-        ):
-
-            background = Image.new(
-
-                'RGB',
-
-                img.size,
-
-                (255, 255, 255)
-
-            )
-
-            if img.mode == 'P':
-
-                img = img.convert(
-                    'RGBA'
+                image.save(
+                    output_path,
+                    "JPEG",
+                    quality=image_quality,
+                    optimize=True,
                 )
 
-            if img.mode == 'RGBA':
+            elif extension == "webp":
+                image.save(
+                    output_path,
+                    "WEBP",
+                    quality=image_quality,
+                    method=6,
+                )
 
-                background.paste(
-
-                    img,
-
-                    mask=img.split()[-1]
-
+            elif extension == "png":
+                image.save(
+                    output_path,
+                    "PNG",
+                    optimize=True,
                 )
 
             else:
+                image.save(output_path)
 
-                background.paste(
-                    img
-                )
+        finally:
+            image.close()
 
-            img = background
+        return str(output_path)
 
-        if fmt == 'JPEG':
-
-            img.save(
-
-                output_path,
-
-                format='JPEG',
-
-                quality=quality,
-
-                optimize=True
-
-            )
-
-        elif fmt == 'PNG':
-
-            img.save(
-
-                output_path,
-
-                format='PNG',
-
-                compress_level=png_compress,
-
-                optimize=True
-
-            )
-
-        elif fmt == 'WEBP':
-
-            img.save(
-
-                output_path,
-
-                format='WEBP',
-
-                quality=quality
-
-            )
-
-        else:
-
-            img.save(
-
-                output_path,
-
-                format=fmt,
-
-                quality=quality
-
-            )
-
-        return output_path
-
-    # ============================================================
+    # =========================================================
     # GIF 分割
-    # ============================================================
+    # =========================================================
 
     def split_gif(
         self,
         input_path,
-        output_format='PNG'
+        output_format="png"
     ):
+        input_path = Path(input_path)
 
-        from PIL import ImageSequence
+        image = Image.open(input_path)
 
-        fmt = output_format.upper()
+        output_files = []
 
-        if fmt == 'JPG':
-
-            fmt = 'JPEG'
-
-        out_ext = (
-
-            'jpg'
-
-            if fmt == 'JPEG'
-
-            else fmt.lower()
-
-        )
-
-        base_name = os.path.splitext(
-            os.path.basename(input_path)
-        )[0]
-
-        base_name = self._sanitize_filename(
-            base_name
-        )
-
-        img = Image.open(
-            input_path
-        )
-
-        output_paths = []
-
-        for i, frame in enumerate(
-            ImageSequence.Iterator(img)
-        ):
-
-            output_path = os.path.join(
-
-                self.output_dir,
-
-                f'{base_name}_frame_{i + 1}.{out_ext}'
-
+        try:
+            frame_count = getattr(
+                image,
+                "n_frames",
+                1
             )
 
-            frame.save(
+            output_format = output_format.lower()
 
-                output_path,
+            if output_format == "jpeg":
+                output_format = "jpg"
 
-                format=fmt
+            for index in range(frame_count):
+                image.seek(index)
 
-            )
+                frame = image.convert("RGBA")
 
-            output_paths.append(
-                output_path
-            )
+                extension = output_format
 
-        return output_paths
-
-
-# ============================================================
-# CLI 入口
-# ============================================================
-
-if __name__ == '__main__':
-
-    import argparse
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        '--tool',
-        required=True
-    )
-
-    parser.add_argument(
-        '--input',
-        nargs='+',
-        required=True
-    )
-
-    parser.add_argument(
-        '--output',
-        default='./outputs'
-    )
-
-    parser.add_argument(
-        '--format',
-        default='PNG'
-    )
-
-    parser.add_argument(
-        '--quality',
-        type=int,
-        default=80,
-        help='壓縮品質 (1-100)'
-    )
-
-    args = parser.parse_args()
-
-    converter = TurnDocConverter(
-        output_dir=args.output
-    )
-
-    try:
-
-        # --------------------------------------------------------
-        # Word → PDF
-        # --------------------------------------------------------
-
-        if args.tool == 'word-to-pdf':
-
-            out = converter.word_to_pdf(
-                args.input[0]
-            )
-
-        # --------------------------------------------------------
-        # PDF → Word
-        # --------------------------------------------------------
-
-        elif args.tool == 'pdf-to-word':
-
-            out = converter.pdf_to_word(
-                args.input[0]
-            )
-
-        # --------------------------------------------------------
-        # PowerPoint → PDF
-        # --------------------------------------------------------
-
-        elif args.tool == 'ppt-to-pdf':
-
-            out = converter.ppt_to_pdf(
-                args.input[0]
-            )
-
-        # --------------------------------------------------------
-        # Excel → PDF
-        # --------------------------------------------------------
-
-        elif args.tool == 'excel-to-pdf':
-
-            out = converter.excel_to_pdf(
-                args.input[0]
-            )
-
-        # --------------------------------------------------------
-        # PDF → PowerPoint
-        # --------------------------------------------------------
-
-        elif args.tool == 'pdf-to-ppt':
-
-            out = converter.pdf_to_ppt(
-                args.input[0]
-            )
-
-        # --------------------------------------------------------
-        # PDF → Excel
-        # --------------------------------------------------------
-
-        elif args.tool == 'pdf-to-excel':
-
-            out = converter.pdf_to_excel(
-                args.input[0]
-            )
-
-        # --------------------------------------------------------
-        # 合併 PDF
-        # --------------------------------------------------------
-
-        elif args.tool == 'merge':
-
-            out = converter.merge_pdfs(
-                args.input
-            )
-
-        # --------------------------------------------------------
-        # PDF 壓縮
-        # --------------------------------------------------------
-
-        elif args.tool == 'compress':
-
-            out = converter.compress_pdf(
-
-                args.input[0],
-
-                args.quality
-
-            )
-
-        # --------------------------------------------------------
-        # PDF → 圖片
-        # --------------------------------------------------------
-
-        elif args.tool == 'pdf-to-image':
-
-            out = converter.pdf_to_images(
-
-                args.input[0],
-
-                args.format
-
-            )
-
-        # --------------------------------------------------------
-        # 圖片 → PDF
-        # --------------------------------------------------------
-
-        elif args.tool == 'image-to-pdf':
-
-            out = converter.images_to_pdf(
-                args.input
-            )
-
-        # --------------------------------------------------------
-        # 圖片轉換
-        # --------------------------------------------------------
-
-        elif args.tool == 'image-convert':
-
-            out = converter.convert_image(
-
-                args.input[0],
-
-                args.format
-
-            )
-
-        # --------------------------------------------------------
-        # 圖片壓縮
-        # --------------------------------------------------------
-
-        elif args.tool == 'image-compress':
-
-            out = converter.compress_image(
-
-                args.input[0],
-
-                args.quality,
-
-                (
-                    args.format
-
-                    if args.format != 'original'
-
-                    else None
+                output_path = self.output_dir / (
+                    f"{input_path.stem}_frame_{index + 1}.{extension}"
                 )
 
-            )
+                if extension in ["jpg", "jpeg"]:
+                    frame = frame.convert("RGB")
 
-        # --------------------------------------------------------
-        # GIF 分割
-        # --------------------------------------------------------
+                    frame.save(
+                        output_path,
+                        "JPEG",
+                        quality=95
+                    )
+                else:
+                    frame.save(
+                        output_path,
+                        output_format.upper()
+                    )
 
-        elif args.tool == 'gif-split':
+                frame.close()
 
-            out = converter.split_gif(
+                output_files.append(str(output_path))
 
-                args.input[0],
+        finally:
+            image.close()
 
-                args.format
-
-            )
-
-        # --------------------------------------------------------
-        # 不支援
-        # --------------------------------------------------------
-
-        else:
-
-            print(
-
-                json.dumps(
-
-                    {
-
-                        'error':
-                        f'不支援的工具: {args.tool}'
-
-                    },
-
-                    ensure_ascii=False
-
-                ),
-
-                file=sys.stderr
-
-            )
-
-            sys.exit(1)
-
-        # --------------------------------------------------------
-        # 成功輸出
-        # --------------------------------------------------------
-
-        print(
-
-            json.dumps(
-
-                out
-
-                if isinstance(
-                    out,
-                    list
-                )
-
-                else [
-                    out
-                ],
-
-                ensure_ascii=False
-
-            ),
-
-            end=''
-
-        )
-
-    except Exception as e:
-
-        error_msg = str(e)
-
-        print(
-
-            json.dumps(
-
-                {
-
-                    'error':
-                    error_msg
-
-                },
-
-                ensure_ascii=False
-
-            ),
-
-            file=sys.stderr
-
-        )
-
-        sys.exit(1)
+        return output_files
