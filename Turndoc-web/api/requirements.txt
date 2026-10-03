@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+
+PyPDF2
+Pillow
+pillow-heif
+pdf2docx
+pdf2image
+
+pywin32

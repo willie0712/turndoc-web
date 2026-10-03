@@ -1,0 +1,2174 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f5f7" />
+    <title>TurnDoc — 文件處理工具</title>
+
+    <style>
+        :root {
+            --bg: #f5f5f7;
+            --surface: rgba(255,255,255,.82);
+            --surface-solid: #ffffff;
+            --text: #171717;
+            --muted: #6e6e73;
+            --line: rgba(0,0,0,.08);
+            --accent: #0071e3;
+            --accent-hover: #0077ed;
+            --danger: #d70015;
+            --success: #188038;
+            --shadow: 0 18px 50px rgba(0,0,0,.08);
+            --radius: 22px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 20% 0%, rgba(0,113,227,.06), transparent 28%),
+                radial-gradient(circle at 90% 10%, rgba(120,80,255,.05), transparent 25%),
+                var(--bg);
+            color: var(--text);
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "SF Pro Display",
+                "SF Pro Text",
+                "Segoe UI",
+                "Microsoft JhengHei",
+                sans-serif;
+        }
+
+        button,
+        input,
+        textarea,
+        select {
+            font: inherit;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .app {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* =========================
+           Header
+        ========================= */
+
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
+            background: rgba(245,245,247,.78);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .header-inner {
+            width: min(1180px, calc(100% - 32px));
+            min-height: 68px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+        }
+
+        .brand {
+            border: 0;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            color: var(--text);
+            font-weight: 750;
+            letter-spacing: -.02em;
+        }
+
+        .brand-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: grid;
+            place-items: center;
+            background: linear-gradient(135deg, #0071e3, #5e5ce6);
+            color: white;
+            box-shadow: 0 7px 18px rgba(0,113,227,.22);
+            font-size: 18px;
+        }
+
+        .brand-name {
+            font-size: 20px;
+        }
+
+        .brand-version {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 2px;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-btn {
+            border: 0;
+            background: rgba(255,255,255,.65);
+            color: #333;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 9px 13px;
+            transition: .2s ease;
+        }
+
+        .header-btn:hover {
+            background: white;
+            transform: translateY(-1px);
+        }
+
+        .github-btn {
+            color: #333;
+            text-decoration: none;
+        }
+
+        .contact-btn {
+            color: white;
+            background: #111;
+            border-color: #111;
+        }
+
+        .contact-btn:hover {
+            background: #2a2a2a;
+        }
+
+        /* =========================
+           Main
+        ========================= */
+
+        main {
+            width: min(1180px, calc(100% - 32px));
+            margin: 0 auto;
+            flex: 1;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 74px 0 42px;
+            animation: fadeUp .45s ease both;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 7px 11px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: rgba(255,255,255,.7);
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 18px;
+        }
+
+        .hero-badge-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #34c759;
+            box-shadow: 0 0 0 4px rgba(52,199,89,.12);
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: clamp(42px, 7vw, 76px);
+            line-height: .98;
+            letter-spacing: -.055em;
+            font-weight: 800;
+        }
+
+        .hero h1 span {
+            background: linear-gradient(90deg, #0071e3, #5e5ce6);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .hero p {
+            max-width: 650px;
+            margin: 22px auto 0;
+            color: var(--muted);
+            font-size: 18px;
+            line-height: 1.7;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 25px;
+        }
+
+        .toolbar-title {
+            font-size: 22px;
+            font-weight: 750;
+            letter-spacing: -.02em;
+        }
+
+        .search-box {
+            position: relative;
+            width: min(320px, 100%);
+        }
+
+        .search-box input {
+            width: 100%;
+            height: 44px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: rgba(255,255,255,.8);
+            padding: 0 15px 0 40px;
+            outline: none;
+            transition: .2s ease;
+        }
+
+        .search-box input:focus {
+            border-color: rgba(0,113,227,.35);
+            box-shadow: 0 0 0 4px rgba(0,113,227,.08);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #888;
+            pointer-events: none;
+        }
+
+        /* =========================
+           Tools
+        ========================= */
+
+        .category {
+            margin-bottom: 34px;
+        }
+
+        .category-title {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 13px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #444;
+        }
+
+        .category-title span {
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0,1fr));
+            gap: 13px;
+        }
+
+        .tool-card {
+            border: 1px solid var(--line);
+            border-radius: 19px;
+            background: rgba(255,255,255,.76);
+            padding: 20px;
+            text-align: left;
+            transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+            animation: fadeUp .35s ease both;
+        }
+
+        .tool-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow);
+            border-color: rgba(0,113,227,.16);
+        }
+
+        .tool-icon {
+            width: 46px;
+            height: 46px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            background: #f0f6ff;
+            font-size: 23px;
+            margin-bottom: 15px;
+        }
+
+        .tool-card h3 {
+            margin: 0 0 7px;
+            font-size: 17px;
+            letter-spacing: -.02em;
+        }
+
+        .tool-card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .tool-card-arrow {
+            margin-top: 17px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 650;
+        }
+
+        .no-results {
+            padding: 50px 20px;
+            text-align: center;
+            color: var(--muted);
+        }
+
+        /* =========================
+           Tool View
+        ========================= */
+
+        .tool-view {
+            padding: 45px 0 70px;
+            animation: fadeUp .4s ease both;
+        }
+
+        .back-btn {
+            border: 0;
+            background: transparent;
+            color: var(--accent);
+            padding: 7px 0;
+            margin-bottom: 25px;
+            font-weight: 650;
+        }
+
+        .tool-heading {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .tool-heading-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 17px;
+            border-radius: 20px;
+            display: grid;
+            place-items: center;
+            background: #f0f6ff;
+            font-size: 30px;
+        }
+
+        .tool-heading h1 {
+            margin: 0;
+            font-size: clamp(30px, 5vw, 46px);
+            letter-spacing: -.04em;
+        }
+
+        .tool-heading p {
+            margin: 10px auto 0;
+            color: var(--muted);
+            line-height: 1.6;
+            max-width: 650px;
+        }
+
+        .converter-card {
+            max-width: 850px;
+            margin: 0 auto;
+            border: 1px solid var(--line);
+            border-radius: 25px;
+            background: rgba(255,255,255,.84);
+            box-shadow: var(--shadow);
+            padding: 25px;
+        }
+
+        .drop-zone {
+            min-height: 230px;
+            border: 2px dashed #d5d5da;
+            border-radius: 20px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            padding: 25px;
+            transition: .2s ease;
+            background: rgba(250,250,252,.75);
+        }
+
+        .drop-zone.dragover {
+            border-color: var(--accent);
+            background: #f2f8ff;
+            transform: scale(1.005);
+        }
+
+        .upload-icon {
+            font-size: 42px;
+            margin-bottom: 8px;
+        }
+
+        .drop-zone h3 {
+            margin: 0 0 7px;
+            font-size: 18px;
+        }
+
+        .drop-zone p {
+            margin: 0 0 15px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .primary-btn {
+            border: 0;
+            background: var(--accent);
+            color: white;
+            padding: 11px 17px;
+            border-radius: 12px;
+            font-weight: 650;
+            transition: .2s ease;
+        }
+
+        .primary-btn:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .secondary-btn {
+            border: 1px solid var(--line);
+            background: white;
+            color: #333;
+            padding: 11px 17px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+
+        .file-list {
+            margin-top: 18px;
+            display: grid;
+            gap: 9px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 12px 14px;
+            background: white;
+        }
+
+        .file-info {
+            min-width: 0;
+        }
+
+        .file-name {
+            font-size: 14px;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-size {
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 3px;
+        }
+
+        .remove-file {
+            border: 0;
+            background: transparent;
+            color: #888;
+            font-size: 18px;
+        }
+
+        .options {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0,1fr));
+            gap: 13px;
+            margin-top: 18px;
+        }
+
+        .option {
+            padding: 15px;
+            border: 1px solid var(--line);
+            border-radius: 15px;
+            background: rgba(250,250,252,.75);
+        }
+
+        .option label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 650;
+        }
+
+        .option select,
+        .option input[type="range"] {
+            width: 100%;
+        }
+
+        .option select {
+            height: 40px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            background: white;
+            padding: 0 10px;
+            outline: none;
+        }
+
+        .quality-value {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .action-row {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .progress-box {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-box.show {
+            display: block;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .progress-track {
+            height: 8px;
+            border-radius: 99px;
+            background: #e9e9ed;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #0071e3, #5e5ce6);
+            transition: width .3s ease;
+        }
+
+        .status {
+            margin-top: 13px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .result-box {
+            display: none;
+            margin-top: 20px;
+            border: 1px solid rgba(52,199,89,.22);
+            background: #f4fbf6;
+            border-radius: 17px;
+            padding: 18px;
+        }
+
+        .result-box.show {
+            display: block;
+        }
+
+        .result-title {
+            font-weight: 700;
+            margin-bottom: 11px;
+        }
+
+        .result-file {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 11px 0;
+            border-bottom: 1px solid rgba(0,0,0,.06);
+        }
+
+        .result-file:last-child {
+            border-bottom: 0;
+        }
+
+        .download-btn {
+            border: 0;
+            background: #188038;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 9px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 650;
+            white-space: nowrap;
+        }
+
+        .zip-btn {
+            display: inline-block;
+            margin-top: 12px;
+            border: 1px solid rgba(24,128,56,.2);
+            background: white;
+            color: #188038;
+            padding: 9px 13px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 650;
+        }
+
+        .error-box {
+            display: none;
+            margin-top: 18px;
+            border: 1px solid rgba(215,0,21,.15);
+            background: #fff5f5;
+            color: #a4000f;
+            border-radius: 15px;
+            padding: 14px;
+            line-height: 1.6;
+            font-size: 13px;
+        }
+
+        .error-box.show {
+            display: block;
+        }
+
+        /* =========================
+           Contact Modal
+        ========================= */
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: rgba(0,0,0,.42);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        .modal-backdrop.show {
+            display: flex;
+            animation: fadeIn .2s ease both;
+        }
+
+        .modal {
+            width: min(650px, 100%);
+            max-height: min(850px, calc(100vh - 36px));
+            overflow-y: auto;
+            background: rgba(255,255,255,.97);
+            border: 1px solid rgba(255,255,255,.7);
+            border-radius: 25px;
+            box-shadow: 0 30px 90px rgba(0,0,0,.22);
+            padding: 25px;
+            animation: modalIn .25s ease both;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 25px;
+            letter-spacing: -.03em;
+        }
+
+        .modal-header p {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .modal-close {
+            width: 34px;
+            height: 34px;
+            border: 0;
+            border-radius: 50%;
+            background: #f1f1f3;
+            color: #555;
+            font-size: 19px;
+            line-height: 1;
+        }
+
+        .contact-field {
+            margin-bottom: 15px;
+        }
+
+        .contact-field label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .contact-field select,
+        .contact-field input,
+        .contact-field textarea {
+            width: 100%;
+            border: 1px solid #dedee3;
+            border-radius: 12px;
+            background: white;
+            outline: none;
+            padding: 11px 12px;
+            transition: .2s ease;
+        }
+
+        .contact-field select,
+        .contact-field input {
+            height: 44px;
+        }
+
+        .contact-field textarea {
+            min-height: 210px;
+            resize: vertical;
+            line-height: 1.65;
+        }
+
+        .contact-field select:focus,
+        .contact-field input:focus,
+        .contact-field textarea:focus {
+            border-color: rgba(0,113,227,.45);
+            box-shadow: 0 0 0 4px rgba(0,113,227,.08);
+        }
+
+        .contact-email {
+            padding: 12px 13px;
+            background: #f5f5f7;
+            border-radius: 12px;
+            color: #555;
+            font-size: 13px;
+            margin-bottom: 17px;
+        }
+
+        .contact-email strong {
+            color: #222;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 9px;
+            margin-top: 17px;
+        }
+
+        .gmail-btn {
+            background: #d93025;
+        }
+
+        .gmail-btn:hover {
+            background: #c5221f;
+        }
+
+        /* =========================
+           Footer
+        ========================= */
+
+        footer {
+            width: min(1180px, calc(100% - 32px));
+            margin: 45px auto 0;
+            padding: 25px 0 30px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        footer a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            color: var(--accent);
+        }
+
+        .footer-right {
+            display: flex;
+            gap: 15px;
+        }
+
+        /* =========================
+           Animations
+        ========================= */
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes modalIn {
+            from {
+                opacity: 0;
+                transform: translateY(12px) scale(.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* =========================
+           Responsive
+        ========================= */
+
+        @media (max-width: 850px) {
+            .tools-grid {
+                grid-template-columns: repeat(2, minmax(0,1fr));
+            }
+
+            .header-inner {
+                min-height: 62px;
+            }
+
+            .github-btn {
+                display: none;
+            }
+        }
+
+        @media (max-width: 620px) {
+            .header-inner,
+            main,
+            footer {
+                width: min(100% - 22px, 1180px);
+            }
+
+            .header-actions {
+                gap: 5px;
+            }
+
+            .header-btn {
+                padding: 8px 10px;
+            }
+
+            .brand-name {
+                font-size: 18px;
+            }
+
+            .brand-version {
+                display: none;
+            }
+
+            .hero {
+                padding: 50px 0 32px;
+            }
+
+            .hero p {
+                font-size: 15px;
+            }
+
+            .toolbar {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .search-box {
+                width: 100%;
+            }
+
+            .tools-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .converter-card {
+                padding: 15px;
+                border-radius: 20px;
+            }
+
+            .options {
+                grid-template-columns: 1fr;
+            }
+
+            .drop-zone {
+                min-height: 200px;
+            }
+
+            .action-row {
+                flex-direction: column;
+            }
+
+            .action-row button {
+                width: 100%;
+            }
+
+            footer {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .modal {
+                padding: 19px;
+                border-radius: 20px;
+            }
+
+            .modal-actions {
+                flex-direction: column-reverse;
+            }
+
+            .modal-actions button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<div class="app">
+
+    <!-- =========================
+         Header
+    ========================== -->
+    <header class="header">
+        <div class="header-inner">
+
+            <button class="brand" id="brandButton" type="button" aria-label="返回首頁">
+                <span class="brand-icon">↻</span>
+                <span class="brand-name">TurnDoc</span>
+                <span class="brand-version">Web</span>
+            </button>
+
+            <div class="header-actions">
+                <a
+                    class="header-btn github-btn"
+                    href="https://github.com/willie0712"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    GitHub
+                </a>
+
+                <button class="header-btn contact-btn" id="openContactBtn" type="button">
+                    ✉ 聯絡我們
+                </button>
+            </div>
+
+        </div>
+    </header>
+
+    <!-- =========================
+         Home
+    ========================== -->
+    <main id="homeView">
+
+        <section class="hero">
+            <div class="hero-badge">
+                <span class="hero-badge-dot"></span>
+                TurnDoc Web
+            </div>
+
+            <h1>
+                文件處理，
+                <span>更簡單。</span>
+            </h1>
+
+            <p>
+                快速處理 PDF、Word、PowerPoint、Excel 與圖片。
+                選擇工具、上傳檔案，剩下的交給 TurnDoc。
+            </p>
+        </section>
+
+        <div class="toolbar">
+            <div class="toolbar-title">所有工具</div>
+
+            <div class="search-box">
+                <span class="search-icon">⌕</span>
+                <input
+                    id="searchInput"
+                    type="search"
+                    placeholder="搜尋工具..."
+                    autocomplete="off"
+                />
+            </div>
+        </div>
+
+        <div id="toolsContainer"></div>
+
+    </main>
+
+    <!-- =========================
+         Tool View
+    ========================== -->
+    <main id="toolView" class="hidden">
+
+        <section class="tool-view">
+
+            <button class="back-btn" id="backBtn" type="button">
+                ← 返回所有工具
+            </button>
+
+            <div class="tool-heading">
+                <div class="tool-heading-icon" id="toolIcon">📄</div>
+                <h1 id="toolTitle">工具</h1>
+                <p id="toolDescription"></p>
+            </div>
+
+            <div class="converter-card">
+
+                <div class="drop-zone" id="dropZone">
+                    <div>
+                        <div class="upload-icon">☁️</div>
+
+                        <h3>拖曳檔案到這裡</h3>
+
+                        <p>
+                            或點擊下方按鈕選擇檔案
+                        </p>
+
+                        <button class="primary-btn" id="chooseFilesBtn" type="button">
+                            選擇檔案
+                        </button>
+
+                        <input
+                            id="fileInput"
+                            type="file"
+                            hidden
+                            multiple
+                        />
+                    </div>
+                </div>
+
+                <div class="file-list" id="fileList"></div>
+
+                <div class="options" id="options"></div>
+
+                <div class="action-row">
+                    <button class="primary-btn" id="convertBtn" type="button">
+                        開始轉換
+                    </button>
+
+                    <button class="secondary-btn" id="clearBtn" type="button">
+                        清除檔案
+                    </button>
+                </div>
+
+                <div class="progress-box" id="progressBox">
+                    <div class="progress-label">
+                        <span id="progressText">準備中...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+
+                    <div class="progress-track">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+
+                    <div class="status" id="statusText">
+                        正在處理...
+                    </div>
+                </div>
+
+                <div class="error-box" id="errorBox"></div>
+
+                <div class="result-box" id="resultBox">
+                    <div class="result-title">
+                        ✓ 轉換完成
+                    </div>
+
+                    <div id="resultFiles"></div>
+
+                    <a
+                        class="zip-btn hidden"
+                        id="zipDownload"
+                        href="#"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        📦 下載 ZIP
+                    </a>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- =========================
+         Contact Modal
+    ========================== -->
+    <div class="modal-backdrop" id="contactModal">
+
+        <div
+            class="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="contactTitle"
+        >
+
+            <div class="modal-header">
+                <div>
+                    <h2 id="contactTitle">聯絡 TurnDoc</h2>
+                    <p>選擇問題類型後，系統會自動準備 Email 內容。</p>
+                </div>
+
+                <button
+                    class="modal-close"
+                    id="closeContactBtn"
+                    type="button"
+                    aria-label="關閉"
+                >
+                    ×
+                </button>
+            </div>
+
+            <div class="contact-email">
+                收件信箱：
+                <strong>contact.website676@gmail.com</strong>
+            </div>
+
+            <div class="contact-field">
+                <label for="contactType">問題類型</label>
+
+                <select id="contactType">
+                    <option value="bug">🐛 Bug／功能異常</option>
+                    <option value="convert">🔄 轉換失敗</option>
+                    <option value="suggestion">💡 功能建議</option>
+                    <option value="usage">❓ 使用問題</option>
+                    <option value="file">📁 檔案相關問題</option>
+                    <option value="general">💬 一般聯絡</option>
+                    <option value="other">📝 其他</option>
+                </select>
+            </div>
+
+            <div class="contact-field">
+                <label for="contactSubject">主旨</label>
+
+                <input
+                    id="contactSubject"
+                    type="text"
+                    autocomplete="off"
+                />
+            </div>
+
+            <div class="contact-field">
+                <label for="contactBody">內容</label>
+
+                <textarea
+                    id="contactBody"
+                    spellcheck="false"
+                ></textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button
+                    class="secondary-btn"
+                    id="cancelContactBtn"
+                    type="button"
+                >
+                    取消
+                </button>
+
+                <button
+                    class="primary-btn gmail-btn"
+                    id="gmailBtn"
+                    type="button"
+                >
+                    ✉ 使用 Gmail 寄送
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- =========================
+         Footer
+    ========================== -->
+    <footer>
+        <div>
+            © 2026 TurnDoc
+        </div>
+
+        <div class="footer-right">
+            <a href="mailto:contact.website676@gmail.com">
+                contact.website676@gmail.com
+            </a>
+
+            <a
+                href="https://github.com/willie0712"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                GitHub
+            </a>
+        </div>
+    </footer>
+
+</div>
+
+<script>
+(() => {
+    "use strict";
+
+    /* =========================================================
+       API
+    ========================================================= */
+
+    const API_BASE = "http://127.0.0.1:8000";
+
+    /* =========================================================
+       Tool Data
+    ========================================================= */
+
+    const TOOLS = [
+        {
+            id: "word-to-pdf",
+            title: "Word → PDF",
+            description: "將 Word 文件轉換成 PDF。",
+            icon: "📄",
+            category: "文件轉換",
+            accept: ".doc,.docx",
+            multiple: false
+        },
+        {
+            id: "pdf-to-word",
+            title: "PDF → Word",
+            description: "將 PDF 轉換成可編輯的 Word 文件。",
+            icon: "📝",
+            category: "文件轉換",
+            accept: ".pdf",
+            multiple: false
+        },
+        {
+            id: "ppt-to-pdf",
+            title: "PPT → PDF",
+            description: "將 PowerPoint 簡報轉換成 PDF。",
+            icon: "📊",
+            category: "文件轉換",
+            accept: ".ppt,.pptx",
+            multiple: false
+        },
+        {
+            id: "excel-to-pdf",
+            title: "Excel → PDF",
+            description: "將 Excel 試算表轉換成 PDF。",
+            icon: "📗",
+            category: "文件轉換",
+            accept: ".xls,.xlsx",
+            multiple: false
+        },
+        {
+            id: "pdf-to-ppt",
+            title: "PDF → PPT",
+            description: "將 PDF 轉換成 PowerPoint。",
+            icon: "📽️",
+            category: "文件轉換",
+            accept: ".pdf",
+            multiple: false
+        },
+        {
+            id: "pdf-to-excel",
+            title: "PDF → Excel",
+            description: "將 PDF 內容轉換成 Excel。",
+            icon: "📊",
+            category: "文件轉換",
+            accept: ".pdf",
+            multiple: false
+        },
+        {
+            id: "merge",
+            title: "合併 PDF",
+            description: "將多個 PDF 合併成一個檔案。",
+            icon: "🔗",
+            category: "PDF 工具",
+            accept: ".pdf",
+            multiple: true
+        },
+        {
+            id: "compress",
+            title: "壓縮 PDF",
+            description: "降低 PDF 檔案大小。",
+            icon: "🗜️",
+            category: "PDF 工具",
+            accept: ".pdf",
+            multiple: false
+        },
+        {
+            id: "pdf-to-image",
+            title: "PDF → 圖片",
+            description: "將 PDF 頁面轉成 PNG、JPG 等圖片。",
+            icon: "🖼️",
+            category: "PDF 工具",
+            accept: ".pdf",
+            multiple: false
+        },
+        {
+            id: "image-to-pdf",
+            title: "圖片 → PDF",
+            description: "將一張或多張圖片製作成 PDF。",
+            icon: "📑",
+            category: "圖片工具",
+            accept: "image/*",
+            multiple: true
+        },
+        {
+            id: "image-convert",
+            title: "圖片轉換",
+            description: "將圖片轉換成 PNG、JPG、WEBP 等格式。",
+            icon: "🔄",
+            category: "圖片工具",
+            accept: "image/*",
+            multiple: false
+        },
+        {
+            id: "image-compress",
+            title: "圖片壓縮",
+            description: "降低圖片檔案大小與品質。",
+            icon: "📦",
+            category: "圖片工具",
+            accept: "image/*",
+            multiple: false
+        },
+        {
+            id: "gif-split",
+            title: "GIF 分割",
+            description: "將 GIF 動畫拆成單張圖片。",
+            icon: "🎞️",
+            category: "圖片工具",
+            accept: ".gif",
+            multiple: false
+        }
+    ];
+
+    const CATEGORY_ORDER = [
+        "文件轉換",
+        "PDF 工具",
+        "圖片工具"
+    ];
+
+    /* =========================================================
+       DOM
+    ========================================================= */
+
+    const homeView = document.getElementById("homeView");
+    const toolView = document.getElementById("toolView");
+
+    const toolsContainer = document.getElementById("toolsContainer");
+    const searchInput = document.getElementById("searchInput");
+
+    const brandButton = document.getElementById("brandButton");
+    const backBtn = document.getElementById("backBtn");
+
+    const toolIcon = document.getElementById("toolIcon");
+    const toolTitle = document.getElementById("toolTitle");
+    const toolDescription = document.getElementById("toolDescription");
+
+    const dropZone = document.getElementById("dropZone");
+    const chooseFilesBtn = document.getElementById("chooseFilesBtn");
+    const fileInput = document.getElementById("fileInput");
+    const fileList = document.getElementById("fileList");
+
+    const options = document.getElementById("options");
+
+    const convertBtn = document.getElementById("convertBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    const progressBox = document.getElementById("progressBox");
+    const progressBar = document.getElementById("progressBar");
+    const progressPercent = document.getElementById("progressPercent");
+    const progressText = document.getElementById("progressText");
+    const statusText = document.getElementById("statusText");
+
+    const errorBox = document.getElementById("errorBox");
+
+    const resultBox = document.getElementById("resultBox");
+    const resultFiles = document.getElementById("resultFiles");
+    const zipDownload = document.getElementById("zipDownload");
+
+    /* =========================================================
+       Contact DOM
+    ========================================================= */
+
+    const openContactBtn = document.getElementById("openContactBtn");
+    const contactModal = document.getElementById("contactModal");
+    const closeContactBtn = document.getElementById("closeContactBtn");
+    const cancelContactBtn = document.getElementById("cancelContactBtn");
+
+    const contactType = document.getElementById("contactType");
+    const contactSubject = document.getElementById("contactSubject");
+    const contactBody = document.getElementById("contactBody");
+    const gmailBtn = document.getElementById("gmailBtn");
+
+    /* =========================================================
+       State
+    ========================================================= */
+
+    let currentTool = null;
+    let selectedFiles = [];
+
+    /* =========================================================
+       Helpers
+    ========================================================= */
+
+    function formatBytes(bytes) {
+        if (!bytes) return "0 B";
+
+        const units = ["B", "KB", "MB", "GB"];
+        const index = Math.floor(Math.log(bytes) / Math.log(1024));
+
+        return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+    }
+
+    function setProgress(percent, text) {
+        const value = Math.max(0, Math.min(100, percent));
+
+        progressBar.style.width = `${value}%`;
+        progressPercent.textContent = `${value}%`;
+        progressText.textContent = text;
+    }
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.classList.add("show");
+    }
+
+    function clearError() {
+        errorBox.textContent = "";
+        errorBox.classList.remove("show");
+    }
+
+    function getFormat() {
+        const select = document.getElementById("outputFormat");
+        return select ? select.value : "PNG";
+    }
+
+    function getQuality() {
+        const range = document.getElementById("quality");
+        return range ? Number(range.value) : 80;
+    }
+
+    function getDownloadUrl(url) {
+        if (!url) return "#";
+
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+
+        return `${API_BASE}${url}`;
+    }
+
+    /* =========================================================
+       Render Tools
+    ========================================================= */
+
+    function renderTools(filter = "") {
+        const keyword = filter.trim().toLowerCase();
+
+        toolsContainer.innerHTML = "";
+
+        let total = 0;
+
+        for (const category of CATEGORY_ORDER) {
+
+            const categoryTools = TOOLS.filter(tool => {
+                if (tool.category !== category) return false;
+
+                if (!keyword) return true;
+
+                return (
+                    tool.title.toLowerCase().includes(keyword) ||
+                    tool.description.toLowerCase().includes(keyword) ||
+                    tool.id.toLowerCase().includes(keyword)
+                );
+            });
+
+            if (!categoryTools.length) continue;
+
+            total += categoryTools.length;
+
+            const section = document.createElement("section");
+            section.className = "category";
+
+            const title = document.createElement("div");
+            title.className = "category-title";
+            title.innerHTML = `
+                ${category}
+                <span>${categoryTools.length} 個工具</span>
+            `;
+
+            const grid = document.createElement("div");
+            grid.className = "tools-grid";
+
+            categoryTools.forEach((tool, index) => {
+                const card = document.createElement("button");
+                card.type = "button";
+                card.className = "tool-card";
+                card.style.animationDelay = `${index * 35}ms`;
+
+                card.innerHTML = `
+                    <div class="tool-icon">${tool.icon}</div>
+                    <h3>${tool.title}</h3>
+                    <p>${tool.description}</p>
+                    <div class="tool-card-arrow">開始使用 →</div>
+                `;
+
+                card.addEventListener("click", () => openTool(tool.id));
+
+                grid.appendChild(card);
+            });
+
+            section.appendChild(title);
+            section.appendChild(grid);
+
+            toolsContainer.appendChild(section);
+        }
+
+        if (!total) {
+            toolsContainer.innerHTML = `
+                <div class="no-results">
+                    找不到符合「${escapeHtml(filter)}」的工具。
+                </div>
+            `;
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    /* =========================================================
+       Open Tool
+    ========================================================= */
+
+    function openTool(toolId) {
+        const tool = TOOLS.find(item => item.id === toolId);
+
+        if (!tool) return;
+
+        currentTool = tool;
+        selectedFiles = [];
+
+        homeView.classList.add("hidden");
+        toolView.classList.remove("hidden");
+
+        toolIcon.textContent = tool.icon;
+        toolTitle.textContent = tool.title;
+        toolDescription.textContent = tool.description;
+
+        fileInput.accept = tool.accept || "*/*";
+        fileInput.multiple = Boolean(tool.multiple);
+
+        renderFiles();
+        renderOptions();
+
+        resetProcessing();
+
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth"
+        });
+    }
+
+    /* =========================================================
+       Back Home
+    ========================================================= */
+
+    function goHome() {
+        currentTool = null;
+        selectedFiles = [];
+
+        toolView.classList.add("hidden");
+        homeView.classList.remove("hidden");
+
+        resetProcessing();
+
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth"
+        });
+    }
+
+    /* =========================================================
+       File Handling
+    ========================================================= */
+
+    function addFiles(files) {
+        if (!currentTool) return;
+
+        const incoming = Array.from(files || []);
+
+        if (!incoming.length) return;
+
+        if (currentTool.multiple) {
+            selectedFiles = [...selectedFiles, ...incoming];
+        } else {
+            selectedFiles = [incoming[0]];
+        }
+
+        renderFiles();
+        clearError();
+        resultBox.classList.remove("show");
+    }
+
+    function renderFiles() {
+        fileList.innerHTML = "";
+
+        if (!selectedFiles.length) return;
+
+        selectedFiles.forEach((file, index) => {
+            const item = document.createElement("div");
+            item.className = "file-item";
+
+            item.innerHTML = `
+                <div class="file-info">
+                    <div class="file-name">${escapeHtml(file.name)}</div>
+                    <div class="file-size">${formatBytes(file.size)}</div>
+                </div>
+
+                <button
+                    class="remove-file"
+                    type="button"
+                    aria-label="移除檔案"
+                    data-index="${index}"
+                >
+                    ×
+                </button>
+            `;
+
+            item.querySelector(".remove-file").addEventListener("click", () => {
+                selectedFiles.splice(index, 1);
+                renderFiles();
+            });
+
+            fileList.appendChild(item);
+        });
+    }
+
+    /* =========================================================
+       Options
+    ========================================================= */
+
+    function renderOptions() {
+        options.innerHTML = "";
+
+        if (!currentTool) return;
+
+        const needsFormat = [
+            "pdf-to-image",
+            "image-convert",
+            "image-compress",
+            "gif-split"
+        ].includes(currentTool.id);
+
+        const needsQuality = [
+            "compress",
+            "image-compress"
+        ].includes(currentTool.id);
+
+        if (needsFormat) {
+            const formatBox = document.createElement("div");
+            formatBox.className = "option";
+
+            formatBox.innerHTML = `
+                <label for="outputFormat">輸出格式</label>
+
+                <select id="outputFormat">
+                    <option value="PNG">PNG</option>
+                    <option value="JPG">JPG</option>
+                    <option value="WEBP">WEBP</option>
+                    <option value="BMP">BMP</option>
+                    <option value="GIF">GIF</option>
+                    <option value="TIFF">TIFF</option>
+                </select>
+            `;
+
+            options.appendChild(formatBox);
+        }
+
+        if (needsQuality) {
+            const qualityBox = document.createElement("div");
+            qualityBox.className = "option";
+
+            qualityBox.innerHTML = `
+                <label for="quality">
+                    品質
+                    <span class="quality-value" id="qualityValue">80</span>
+                </label>
+
+                <input
+                    id="quality"
+                    type="range"
+                    min="1"
+                    max="100"
+                    value="80"
+                />
+            `;
+
+            options.appendChild(qualityBox);
+
+            const quality = qualityBox.querySelector("#quality");
+            const value = qualityBox.querySelector("#qualityValue");
+
+            quality.addEventListener("input", () => {
+                value.textContent = quality.value;
+            });
+        }
+    }
+
+    /* =========================================================
+       Processing
+    ========================================================= */
+
+    function resetProcessing() {
+        progressBox.classList.remove("show");
+
+        setProgress(0, "準備中...");
+
+        statusText.textContent = "";
+
+        clearError();
+
+        resultBox.classList.remove("show");
+        resultFiles.innerHTML = "";
+
+        zipDownload.classList.add("hidden");
+        zipDownload.href = "#";
+
+        convertBtn.disabled = false;
+        convertBtn.textContent = "開始轉換";
+    }
+
+    async function convertFiles() {
+        if (!currentTool) return;
+
+        if (!selectedFiles.length) {
+            showError("請先選擇至少一個檔案。");
+            return;
+        }
+
+        clearError();
+
+        progressBox.classList.add("show");
+        resultBox.classList.remove("show");
+
+        convertBtn.disabled = true;
+        convertBtn.textContent = "處理中...";
+
+        setProgress(10, "正在上傳檔案...");
+        statusText.textContent = "正在將檔案送到 TurnDoc API";
+
+        const formData = new FormData();
+
+        formData.append("tool", currentTool.id);
+
+        selectedFiles.forEach(file => {
+            formData.append("files", file, file.name);
+        });
+
+        formData.append("outputFormat", getFormat());
+        formData.append("quality", String(getQuality()));
+
+        try {
+            setProgress(25, "檔案上傳中...");
+
+            const response = await fetch(`${API_BASE}/api/convert`, {
+                method: "POST",
+                body: formData
+            });
+
+            setProgress(65, "伺服器正在轉換...");
+
+            let data;
+
+            try {
+                data = await response.json();
+            } catch {
+                throw new Error("API 回傳的資料格式不正確。");
+            }
+
+            if (!response.ok || !data.success) {
+                throw new Error(
+                    data.detail ||
+                    data.error ||
+                    "轉換失敗，請稍後再試。"
+                );
+            }
+
+            setProgress(90, "正在準備下載...");
+            statusText.textContent = "轉換完成，正在整理結果";
+
+            renderResults(data);
+
+            setProgress(100, "完成");
+
+            statusText.textContent = "✓ 文件處理完成";
+
+        } catch (error) {
+            console.error(error);
+
+            showError(
+                `無法完成轉換。\n\n${error.message}\n\n` +
+                "請確認 TurnDoc API 是否正在 http://127.0.0.1:8000 執行。"
+            );
+
+            setProgress(0, "轉換失敗");
+            statusText.textContent = "請檢查 API 服務是否正常";
+
+        } finally {
+            convertBtn.disabled = false;
+            convertBtn.textContent = "開始轉換";
+        }
+    }
+
+    /* =========================================================
+       Results
+    ========================================================= */
+
+    function renderResults(data) {
+        resultFiles.innerHTML = "";
+
+        const files = Array.isArray(data.files)
+            ? data.files
+            : [];
+
+        files.forEach(file => {
+            const row = document.createElement("div");
+            row.className = "result-file";
+
+            const name = document.createElement("span");
+            name.textContent = file.name;
+
+            const download = document.createElement("a");
+            download.className = "download-btn";
+            download.href = getDownloadUrl(file.url);
+            download.target = "_blank";
+            download.rel = "noopener noreferrer";
+            download.textContent = "下載";
+
+            row.appendChild(name);
+            row.appendChild(download);
+
+            resultFiles.appendChild(row);
+        });
+
+        if (data.zip) {
+            zipDownload.classList.remove("hidden");
+            zipDownload.href = getDownloadUrl(data.zip.url);
+            zipDownload.textContent = `📦 下載 ${data.zip.name}`;
+        } else {
+            zipDownload.classList.add("hidden");
+        }
+
+        resultBox.classList.add("show");
+    }
+
+    /* =========================================================
+       Contact Templates
+    ========================================================= */
+
+    const CONTACT_TEMPLATES = {
+
+        bug: {
+            subject: "[TurnDoc] Bug／功能異常回報",
+            body:
+`您好，我在使用 TurnDoc 時遇到功能異常。
+
+使用的功能：
+發生問題的檔案格式：
+錯誤訊息：
+
+問題描述：
+
+
+如果需要，我可以提供更多資訊。
+
+謝謝。`
+        },
+
+        convert: {
+            subject: "[TurnDoc] 文件轉換失敗回報",
+            body:
+`您好，我在使用 TurnDoc 進行文件轉換時遇到問題。
+
+使用功能：
+原始檔案格式：
+轉換目標格式：
+錯誤訊息：
+
+問題描述：
+
+
+謝謝。`
+        },
+
+        suggestion: {
+            subject: "[TurnDoc] 功能建議",
+            body:
+`您好，我想提供 TurnDoc 一項功能建議。
+
+建議功能：
+
+
+希望這項功能可以如何運作：
+
+
+其他補充：
+
+
+謝謝。`
+        },
+
+        usage: {
+            subject: "[TurnDoc] 使用問題詢問",
+            body:
+`您好，我在使用 TurnDoc 時有一個問題。
+
+使用的功能：
+
+
+遇到的問題：
+
+
+我希望了解：
+
+
+謝謝。`
+        },
+
+        file: {
+            subject: "[TurnDoc] 檔案相關問題",
+            body:
+`您好，我在使用 TurnDoc 處理檔案時遇到問題。
+
+檔案格式：
+檔案大小：
+使用的功能：
+
+問題描述：
+
+
+錯誤訊息：
+
+
+謝謝。`
+        },
+
+        general: {
+            subject: "[TurnDoc] 一般聯絡",
+            body:
+`您好，我想聯絡 TurnDoc。
+
+聯絡內容：
+
+
+謝謝。`
+        },
+
+        other: {
+            subject: "[TurnDoc] 其他問題",
+            body:
+`您好，我想聯絡 TurnDoc。
+
+問題／內容：
+
+
+其他補充：
+
+
+謝謝。`
+        }
+
+    };
+
+    function updateContactTemplate() {
+        const template = CONTACT_TEMPLATES[contactType.value];
+
+        if (!template) return;
+
+        contactSubject.value = template.subject;
+        contactBody.value = template.body;
+    }
+
+    /* =========================================================
+       Contact Modal
+    ========================================================= */
+
+    function openContact() {
+        updateContactTemplate();
+
+        contactModal.classList.add("show");
+
+        document.body.style.overflow = "hidden";
+
+        setTimeout(() => {
+            contactType.focus();
+        }, 50);
+    }
+
+    function closeContact() {
+        contactModal.classList.remove("show");
+        document.body.style.overflow = "";
+    }
+
+    /* =========================================================
+       Open Gmail
+    ========================================================= */
+
+    function openGmail() {
+        const to = "contact.website676@gmail.com";
+        const subject = contactSubject.value.trim();
+        const body = contactBody.value.trim();
+
+        if (!subject) {
+            contactSubject.focus();
+            return;
+        }
+
+        if (!body) {
+            contactBody.focus();
+            return;
+        }
+
+        const gmailUrl =
+            "https://mail.google.com/mail/?view=cm&fs=1" +
+            `&to=${encodeURIComponent(to)}` +
+            `&su=${encodeURIComponent(subject)}` +
+            `&body=${encodeURIComponent(body)}`;
+
+        window.open(
+            gmailUrl,
+            "_blank",
+            "noopener,noreferrer"
+        );
+    }
+
+    /* =========================================================
+       Events
+    ========================================================= */
+
+    brandButton.addEventListener("click", goHome);
+
+    backBtn.addEventListener("click", goHome);
+
+    searchInput.addEventListener("input", () => {
+        renderTools(searchInput.value);
+    });
+
+    chooseFilesBtn.addEventListener("click", () => {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener("change", event => {
+        addFiles(event.target.files);
+        event.target.value = "";
+    });
+
+    dropZone.addEventListener("dragover", event => {
+        event.preventDefault();
+        dropZone.classList.add("dragover");
+    });
+
+    dropZone.addEventListener("dragleave", event => {
+        event.preventDefault();
+        dropZone.classList.remove("dragover");
+    });
+
+    dropZone.addEventListener("drop", event => {
+        event.preventDefault();
+
+        dropZone.classList.remove("dragover");
+
+        addFiles(event.dataTransfer.files);
+    });
+
+    convertBtn.addEventListener("click", convertFiles);
+
+    clearBtn.addEventListener("click", () => {
+        selectedFiles = [];
+        renderFiles();
+        resetProcessing();
+    });
+
+    /* Contact */
+
+    openContactBtn.addEventListener("click", openContact);
+
+    closeContactBtn.addEventListener("click", closeContact);
+
+    cancelContactBtn.addEventListener("click", closeContact);
+
+    contactType.addEventListener("change", updateContactTemplate);
+
+    gmailBtn.addEventListener("click", openGmail);
+
+    contactModal.addEventListener("click", event => {
+        if (event.target === contactModal) {
+            closeContact();
+        }
+    });
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            if (contactModal.classList.contains("show")) {
+                closeContact();
+            }
+        }
+    });
+
+    /* =========================================================
+       Init
+    ========================================================= */
+
+    renderTools();
+
+})();
+</script>
+
+</body>
+</html>
