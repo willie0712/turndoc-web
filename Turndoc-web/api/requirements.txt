@@ -2,8 +2,20 @@ fastapi
 uvicorn[standard]
 python-multipart
 
-PyPDF2
 Pillow
-pillow-heif
+PyMuPDF
+pypdf
+
+python-docx
+openpyxl
+python-pptx
+
 pdf2docx
-pdf2image
+img2pdf
+reportlab
+
+pandas
+openpyxl
+
+aiofiles
+```
