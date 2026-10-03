@@ -18,12 +18,15 @@ from converter import TurnDocConverter
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# 專案根目錄
+# main.py:
+# Turndoc-web/api/main.py
+#
+# 上一層：
 # Turndoc-web/
-# ├── index.html
-# └── Turndoc-web/
-#     └── api/
-PROJECT_DIR = BASE_DIR.parent.parent
+#
+# 因此 index.html 位於：
+# Turndoc-web/index.html
+PROJECT_DIR = BASE_DIR.parent
 
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
@@ -60,7 +63,6 @@ app.add_middleware(
 # 靜態網站
 # ============================================================
 
-# 如果網站有 assets 資料夾，就提供 /assets/...
 ASSETS_DIR = PROJECT_DIR / "assets"
 
 if ASSETS_DIR.exists() and ASSETS_DIR.is_dir():
@@ -97,14 +99,8 @@ def root():
 
 @app.get("/{file_path:path}")
 def static_files(file_path: str):
-    """
-    提供網站根目錄的 CSS、JS、圖片等靜態檔案。
 
-    API 路徑會由下面的 API routes 處理，
-    因此不會影響 /api/...
-    """
-
-    # 不讓這個路由處理 API
+    # API 路徑不由這裡處理
     if file_path.startswith("api/"):
         raise HTTPException(
             status_code=404,
@@ -113,7 +109,7 @@ def static_files(file_path: str):
 
     requested_file = PROJECT_DIR / file_path
 
-    # 防止 ../ 路徑穿越
+    # 防止路徑穿越
     try:
         requested_file.resolve().relative_to(
             PROJECT_DIR.resolve()
@@ -142,7 +138,7 @@ def static_files(file_path: str):
 
 
 # ============================================================
-# 工具
+# 支援工具
 # ============================================================
 
 SUPPORTED_TOOLS = {
@@ -162,10 +158,11 @@ SUPPORTED_TOOLS = {
 }
 
 
+# ============================================================
+# 檔名安全處理
+# ============================================================
+
 def safe_filename(filename: str) -> str:
-    """
-    避免使用者上傳奇怪檔名造成路徑問題。
-    """
 
     if not filename:
         return "file"
@@ -180,10 +177,11 @@ def safe_filename(filename: str) -> str:
     return filename or "file"
 
 
+# ============================================================
+# Job
+# ============================================================
+
 def create_job():
-    """
-    每次轉換建立獨立工作目錄。
-    """
 
     job_id = uuid.uuid4().hex
 
@@ -208,9 +206,6 @@ def create_job():
 
 
 def cleanup_job(job_id: str):
-    """
-    清理暫存檔。
-    """
 
     upload_path = UPLOAD_DIR / job_id
     output_path = OUTPUT_DIR / job_id
@@ -243,9 +238,6 @@ def converter_run(
     output_format="PNG",
     quality=80
 ):
-    """
-    使用 TurnDocConverter。
-    """
 
     converter = TurnDocConverter(
         output_dir=str(output_dir)
@@ -559,7 +551,7 @@ async def convert(
 
     finally:
 
-        # 上傳檔案可以刪除
+        # 上傳檔案刪除
         # 輸出檔案保留給下載
 
         try:
