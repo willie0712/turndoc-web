@@ -94,50 +94,6 @@ def root():
 
 
 # ============================================================
-# 靜態檔案
-# ============================================================
-
-@app.get("/{file_path:path}")
-def static_files(file_path: str):
-
-    # API 路徑不由這裡處理
-    if file_path.startswith("api/"):
-        raise HTTPException(
-            status_code=404,
-            detail="Not Found"
-        )
-
-    requested_file = PROJECT_DIR / file_path
-
-    # 防止路徑穿越
-    try:
-        requested_file.resolve().relative_to(
-            PROJECT_DIR.resolve()
-        )
-    except ValueError:
-        raise HTTPException(
-            status_code=404,
-            detail="Not Found"
-        )
-
-    if not requested_file.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Not Found"
-        )
-
-    if not requested_file.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="Not Found"
-        )
-
-    return FileResponse(
-        path=str(requested_file)
-    )
-
-
-# ============================================================
 # 支援工具
 # ============================================================
 
@@ -598,6 +554,44 @@ def download(
         path=str(output_path),
         filename=filename,
         media_type="application/octet-stream"
+    )
+
+
+# ============================================================
+# 靜態檔案（必須放在所有 /api 路由之後）
+# ============================================================
+
+@app.get("/{file_path:path}")
+def static_files(file_path: str):
+
+    # API 路徑不由這裡處理
+    if file_path.startswith("api/"):
+        raise HTTPException(
+            status_code=404,
+            detail="Not Found"
+        )
+
+    requested_file = PROJECT_DIR / file_path
+
+    # 防止路徑穿越
+    try:
+        requested_file.resolve().relative_to(
+            PROJECT_DIR.resolve()
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail="Not Found"
+        )
+
+    if not requested_file.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Not Found"
+        )
+
+    return FileResponse(
+        path=str(requested_file)
     )
 
 
