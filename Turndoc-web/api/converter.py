@@ -9,7 +9,7 @@ import tempfile
 import glob
 from pathlib import Path
 
-from PyPDF2 import PdfMerger, PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter
 from PIL import Image
 
 # =========================================================
@@ -35,7 +35,8 @@ except ImportError:
 class TurnDocConverter:
 
     def __init__(self, output_dir="outputs"):
-        self.output_dir = Path(output_dir)
+        # 一定要用絕對路徑，LibreOffice 的 UserInstallation 才是有效的 file:// URI
+        self.output_dir = Path(output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # -------------------------------------------------
@@ -615,14 +616,15 @@ class TurnDocConverter:
             raise RuntimeError("沒有 PDF 可以合併。")
 
         output_path = self.output_dir / f"merged_{uuid.uuid4().hex[:8]}.pdf"
-        merger = PdfMerger()
+        writer = PdfWriter()
 
         try:
             for path in input_paths:
-                merger.append(str(path))
-            merger.write(str(output_path))
+                writer.append(str(path))
+            with open(output_path, "wb") as f:
+                writer.write(f)
         finally:
-            merger.close()
+            writer.close()
 
         return str(output_path)
 
@@ -666,7 +668,7 @@ class TurnDocConverter:
             if result.returncode == 0 and output_path.exists():
                 return str(output_path)
 
-        # 沒有 Ghostscript → 使用 PyPDF2 重寫
+        # 沒有 Ghostscript → 使用 pypdf 重寫
         reader = PdfReader(str(input_path))
         writer = PdfWriter()
         for page in reader.pages:
