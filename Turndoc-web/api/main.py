@@ -44,6 +44,22 @@ app.add_middleware(
 
 
 # ============================================================
+# 首頁
+# ============================================================
+
+@app.get("/")
+def root():
+    return {
+        "name": "TurnDoc API",
+        "status": "online",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/api/health",
+        "tools": "/api/tools"
+    }
+
+
+# ============================================================
 # 工具
 # ============================================================
 
@@ -74,6 +90,7 @@ def safe_filename(filename: str) -> str:
     filename = Path(filename).name
 
     invalid_chars = '<>:"/\\|?*'
+
     for char in invalid_chars:
         filename = filename.replace(char, "")
 
@@ -420,9 +437,11 @@ def download(
 if __name__ == "__main__":
     import uvicorn
 
+    port = int(os.environ.get("PORT", "8000"))
+
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
-        port=8000,
-        reload=True
+        port=port,
+        reload=False
     )
