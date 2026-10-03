@@ -4,7 +4,6 @@ python-multipart
 Pillow
 PyMuPDF
 pypdf
-PyPDF2
 python-docx
 openpyxl
 python-pptx
