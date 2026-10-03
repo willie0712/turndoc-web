@@ -6,19 +6,26 @@ import subprocess
 import shutil
 import re
 import tempfile
+import glob
 from pathlib import Path
 
 from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 from PIL import Image
 
+# =========================================================
 # HEIC 支援
+# =========================================================
+
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
 except ImportError:
     pass
 
+# =========================================================
 # PDF → Word
+# =========================================================
+
 try:
     from pdf2docx import Converter
 except ImportError:
@@ -26,42 +33,80 @@ except ImportError:
 
 
 class TurnDocConverter:
+
     def __init__(self, output_dir="outputs"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.libreoffice_path = self._find_libreoffice_path()
+        # -------------------------------------------------
+        # 轉換引擎
+        # -------------------------------------------------
 
+        # Microsoft Office：Windows 優先
         self.office_available = self._check_office()
-        self.libreoffice_available = self.libreoffice_path is not None
 
-        print(f"Microsoft Office available: {self.office_available}")
-        print(f"LibreOffice available: {self.libreoffice_available}")
-        print(f"LibreOffice path: {self.libreoffice_path}")
+        # LibreOffice：Windows / Linux / Render 備援
+        self.libreoffice_path = self._find_libreoffice_path()
+        self.libreoffice_available = (
+            self.libreoffice_path is not None
+        )
+
+        print(
+            f"[TurnDoc] Microsoft Office: "
+            f"{self.office_available}"
+        )
+
+        print(
+            f"[TurnDoc] LibreOffice: "
+            f"{self.libreoffice_available}"
+        )
+
+        print(
+            f"[TurnDoc] LibreOffice path: "
+            f"{self.libreoffice_path}"
+        )
 
     # =========================================================
-    # 工具
+    # 基本工具
     # =========================================================
 
     def _get_output_path(self, input_path, suffix):
         input_path = Path(input_path)
-        return self.output_dir / f"{input_path.stem}.{suffix}"
+
+        return self.output_dir / (
+            f"{input_path.stem}.{suffix}"
+        )
 
     def _sanitize_filename(self, filename):
         filename = os.path.basename(str(filename))
 
-        # 修正可能出現的 Unicode escape
-        if re.search(r"\\u[0-9a-fA-F]{4}", filename):
+        # 只處理真正的 \uXXXX escape
+        if re.search(
+            r"\\u[0-9a-fA-F]{4}",
+            filename
+        ):
             try:
-                filename = filename.encode("utf-8").decode("unicode_escape")
+                filename = filename.encode(
+                    "utf-8"
+                ).decode(
+                    "unicode_escape"
+                )
             except Exception:
                 pass
 
-        filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+        filename = re.sub(
+            r'[<>:"/\\|?*]',
+            "_",
+            filename
+        )
+
         filename = filename.strip()
 
         if not filename:
-            filename = f"file_{uuid.uuid4().hex[:8]}"
+            filename = (
+                f"file_"
+                f"{uuid.uuid4().hex[:8]}"
+            )
 
         return filename
 
@@ -70,90 +115,138 @@ class TurnDocConverter:
     # =========================================================
 
     def _check_office(self):
-        # Office COM 只能在 Windows 使用
+        """
+        Microsoft Office 只在 Windows 使用 COM。
+        Render/Linux 不會嘗試啟動 Office。
+        """
+
         if os.name != "nt":
             return False
 
         try:
             import win32com.client
             import pythoncom
+        except ImportError:
+            return False
 
+        word = None
+
+        try:
             pythoncom.CoInitialize()
 
-            word = None
+            word = win32com.client.DispatchEx(
+                "Word.Application"
+            )
 
-            try:
-                word = win32com.client.DispatchEx("Word.Application")
-                word.Visible = False
-                word.Quit()
-                word = None
-                return True
-            except Exception:
-                if word:
-                    try:
-                        word.Quit()
-                    except Exception:
-                        pass
-                return False
-            finally:
+            word.Visible = False
+            word.DisplayAlerts = 0
+
+            return True
+
+        except Exception as error:
+            print(
+                f"[TurnDoc] Office detection failed: "
+                f"{error}"
+            )
+
+            return False
+
+        finally:
+            if word is not None:
                 try:
-                    pythoncom.CoUninitialize()
+                    word.Quit()
                 except Exception:
                     pass
 
-        except Exception:
-            return False
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
 
     # =========================================================
-    # LibreOffice / soffice
+    # LibreOffice
     # =========================================================
 
     def _find_libreoffice_path(self):
+        """
+        依序尋找：
+        1. PATH 裡的 soffice
+        2. PATH 裡的 libreoffice
+        3. Windows 常見安裝位置
+        4. Linux / Render 常見位置
+        """
+
         candidates = []
 
+        # -------------------------------------------------
         # PATH
-        for command in ("soffice", "libreoffice"):
+        # -------------------------------------------------
+
+        for command in (
+            "soffice",
+            "libreoffice",
+        ):
             found = shutil.which(command)
+
             if found:
                 candidates.append(found)
 
+        # -------------------------------------------------
         # Windows
+        # -------------------------------------------------
+
         if os.name == "nt":
             candidates.extend([
                 r"C:\Program Files\LibreOffice\program\soffice.exe",
                 r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
             ])
 
+        # -------------------------------------------------
         # Linux / Render
+        # -------------------------------------------------
+
         candidates.extend([
             "/usr/bin/soffice",
-            "/usr/local/bin/soffice",
             "/usr/bin/libreoffice",
+            "/usr/local/bin/soffice",
             "/usr/local/bin/libreoffice",
             "/opt/libreoffice/program/soffice",
             "/opt/libreoffice/program/soffice.bin",
             "/usr/lib/libreoffice/program/soffice",
             "/usr/lib/libreoffice/program/soffice.bin",
+            "/usr/lib/libreoffice/program/soffice.com",
         ])
 
-        # 去除重複
         checked = set()
 
-        for path in candidates:
-            if not path:
+        for candidate in candidates:
+
+            if not candidate:
                 continue
 
-            path = str(path)
+            candidate = str(candidate)
 
-            if path in checked:
+            if candidate in checked:
                 continue
 
-            checked.add(path)
+            checked.add(candidate)
 
             try:
-                if os.path.isfile(path) and os.access(path, os.X_OK):
+
+                # 直接檢查檔案
+                if os.path.isfile(candidate):
+
+                    if not os.access(
+                        candidate,
+                        os.X_OK
+                    ):
+                        continue
+
                     result = subprocess.run(
-                        [path, "--version"],
+                        [
+                            candidate,
+                            "--version"
+                        ],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
@@ -161,28 +254,43 @@ class TurnDocConverter:
                     )
 
                     if result.returncode == 0:
-                        return path
+                        return candidate
 
-                elif shutil.which(path):
-                    return path
+                # PATH command
+                else:
 
-            except Exception:
-                continue
+                    found = shutil.which(candidate)
+
+                    if found:
+                        return found
+
+            except Exception as error:
+                print(
+                    f"[TurnDoc] "
+                    f"LibreOffice check failed: "
+                    f"{error}"
+                )
 
         return None
 
     def _check_libreoffice(self):
-        return self._find_libreoffice_path() is not None
+        return (
+            self._find_libreoffice_path()
+            is not None
+        )
 
     # =========================================================
-    # LibreOffice conversion
+    # LibreOffice 轉換
     # =========================================================
 
-    def _convert_with_libreoffice(self, input_path, output_format):
+    def _convert_with_libreoffice(
+        self,
+        input_path,
+        output_format
+    ):
         if not self.libreoffice_path:
             raise RuntimeError(
-                "找不到 LibreOffice。\n"
-                "Render/Linux 需要安裝 LibreOffice 才能進行 Word、PowerPoint、Excel 等文件轉換。"
+                "目前伺服器沒有 LibreOffice。"
             )
 
         input_path = Path(input_path)
@@ -195,29 +303,48 @@ class TurnDocConverter:
         )
 
         try:
-            # LibreOffice 不同格式使用不同 filter
+
             filters = {
-                "pdf": "pdf:writer_pdf_Export",
-                "docx": "docx:Office Open XML Text",
-                "pptx": "pptx:Impress MS PowerPoint 2007 XML",
-                "xlsx": "xlsx:Calc MS Excel 2007 XML",
+                "pdf":
+                    "pdf:writer_pdf_Export",
+
+                "docx":
+                    "docx:Office Open XML Text",
+
+                "pptx":
+                    "pptx:Impress MS PowerPoint 2007 XML",
+
+                "xlsx":
+                    "xlsx:Calc MS Excel 2007 XML",
             }
 
-            convert_filter = filters.get(output_format, output_format)
+            convert_filter = filters.get(
+                output_format,
+                output_format
+            )
 
             command = [
                 self.libreoffice_path,
+
                 "--headless",
                 "--nologo",
                 "--nodefault",
                 "--nofirststartwizard",
                 "--norestore",
+
                 "--convert-to",
                 convert_filter,
+
                 "--outdir",
                 str(temp_dir),
+
                 str(input_path),
             ]
+
+            print(
+                "[TurnDoc] LibreOffice command:",
+                " ".join(command)
+            )
 
             result = subprocess.run(
                 command,
@@ -227,129 +354,262 @@ class TurnDocConverter:
                 timeout=180,
             )
 
-            output_name = input_path.stem + "." + output_format
-            generated_file = temp_dir / output_name
+            stdout = (
+                result.stdout.strip()
+                if result.stdout
+                else ""
+            )
 
-            if result.returncode != 0:
-                error = result.stderr.strip() or result.stdout.strip()
+            stderr = (
+                result.stderr.strip()
+                if result.stderr
+                else ""
+            )
 
-                raise RuntimeError(
-                    f"LibreOffice 轉換失敗。\n{error}"
+            print(
+                f"[TurnDoc] LibreOffice stdout: "
+                f"{stdout}"
+            )
+
+            if stderr:
+                print(
+                    f"[TurnDoc] LibreOffice stderr: "
+                    f"{stderr}"
                 )
 
-            if not generated_file.exists():
-                # 有些版本輸出的檔名可能大小寫不同
-                matches = list(temp_dir.glob(f"{input_path.stem}.*"))
+            if result.returncode != 0:
 
-                if matches:
-                    generated_file = matches[0]
-                else:
+                message = (
+                    stderr
+                    or stdout
+                    or "LibreOffice 執行失敗。"
+                )
+
+                raise RuntimeError(
+                    f"LibreOffice 轉換失敗：\n"
+                    f"{message}"
+                )
+
+            # -------------------------------------------------
+            # 找輸出檔
+            # -------------------------------------------------
+
+            expected = (
+                temp_dir
+                / f"{input_path.stem}.{output_format}"
+            )
+
+            if expected.exists():
+                generated_file = expected
+
+            else:
+
+                matches = list(
+                    temp_dir.glob(
+                        f"{input_path.stem}.*"
+                    )
+                )
+
+                if not matches:
+
                     raise RuntimeError(
-                        "LibreOffice 執行完成，但找不到輸出檔案。"
+                        "LibreOffice 已執行，"
+                        "但找不到輸出檔案。"
                     )
 
-            final_path = self.output_dir / output_name
+                generated_file = matches[0]
+
+            final_path = (
+                self.output_dir
+                / f"{input_path.stem}.{output_format}"
+            )
 
             if final_path.exists():
                 final_path.unlink()
 
-            shutil.move(str(generated_file), str(final_path))
+            shutil.move(
+                str(generated_file),
+                str(final_path)
+            )
+
+            if not final_path.exists():
+                raise RuntimeError(
+                    "輸出檔案建立失敗。"
+                )
 
             return str(final_path)
 
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            shutil.rmtree(
+                temp_dir,
+                ignore_errors=True
+            )
 
     # =========================================================
-    # Microsoft Office conversion
+    # Microsoft Office 轉換
     # =========================================================
 
-    def _convert_with_office(self, input_path, output_format):
+    def _convert_with_office(
+        self,
+        input_path,
+        output_format
+    ):
+
         if not self.office_available:
-            raise RuntimeError("Microsoft Office 不可用。")
+            raise RuntimeError(
+                "Microsoft Office 不可用。"
+            )
+
+        import win32com.client
+        import pythoncom
+
+        input_path = Path(input_path).resolve()
+
+        output_path = self._get_output_path(
+            input_path,
+            output_format
+        )
+
+        if output_path.exists():
+            output_path.unlink()
+
+        pythoncom.CoInitialize()
+
+        word = None
+        powerpoint = None
+        excel = None
 
         try:
-            import win32com.client
-            import pythoncom
 
-            pythoncom.CoInitialize()
+            extension = (
+                input_path.suffix.lower()
+            )
 
-            input_path = str(Path(input_path).resolve())
+            # =================================================
+            # Word → PDF
+            # =================================================
 
-            ext = Path(input_path).suffix.lower()
-            output_path = self._get_output_path(input_path, output_format)
+            if extension in (
+                ".doc",
+                ".docx",
+            ) and output_format == "pdf":
 
-            if output_path.exists():
-                output_path.unlink()
-
-            if ext in [".doc", ".docx"]:
-                word = win32com.client.DispatchEx("Word.Application")
-
-                try:
-                    word.Visible = False
-                    word.DisplayAlerts = 0
-
-                    document = word.Documents.Open(input_path)
-                    document.SaveAs(
-                        str(output_path),
-                        FileFormat=17
+                word = (
+                    win32com.client.DispatchEx(
+                        "Word.Application"
                     )
-                    document.Close(False)
+                )
 
-                finally:
-                    word.Quit()
+                word.Visible = False
+                word.DisplayAlerts = 0
 
-            elif ext in [".ppt", ".pptx"]:
-                powerpoint = win32com.client.DispatchEx(
-                    "PowerPoint.Application"
+                document = word.Documents.Open(
+                    str(input_path)
                 )
 
                 try:
-                    presentation = powerpoint.Presentations.Open(
-                        input_path,
+                    document.ExportAsFixedFormat(
+                        str(output_path),
+                        17
+                    )
+                finally:
+                    document.Close(False)
+
+            # =================================================
+            # PowerPoint → PDF
+            # =================================================
+
+            elif extension in (
+                ".ppt",
+                ".pptx",
+            ) and output_format == "pdf":
+
+                powerpoint = (
+                    win32com.client.DispatchEx(
+                        "PowerPoint.Application"
+                    )
+                )
+
+                presentation = (
+                    powerpoint.Presentations.Open(
+                        str(input_path),
                         WithWindow=False
                     )
+                )
 
+                try:
                     presentation.SaveAs(
                         str(output_path),
                         32
                     )
-
+                finally:
                     presentation.Close()
 
-                finally:
-                    powerpoint.Quit()
+            # =================================================
+            # Excel → PDF
+            # =================================================
 
-            elif ext in [".xls", ".xlsx"]:
-                excel = win32com.client.DispatchEx("Excel.Application")
+            elif extension in (
+                ".xls",
+                ".xlsx",
+            ) and output_format == "pdf":
+
+                excel = (
+                    win32com.client.DispatchEx(
+                        "Excel.Application"
+                    )
+                )
+
+                excel.Visible = False
+                excel.DisplayAlerts = False
+
+                workbook = excel.Workbooks.Open(
+                    str(input_path)
+                )
 
                 try:
-                    excel.Visible = False
-                    excel.DisplayAlerts = False
-
-                    workbook = excel.Workbooks.Open(input_path)
-
                     workbook.ExportAsFixedFormat(
                         0,
                         str(output_path)
                     )
-
+                finally:
                     workbook.Close(False)
 
-                finally:
-                    excel.Quit()
-
             else:
+
                 raise RuntimeError(
-                    f"Microsoft Office 不支援此檔案格式：{ext}"
+                    "目前 Microsoft Office "
+                    "不支援這個轉換組合。"
                 )
 
             if not output_path.exists():
-                raise RuntimeError("Office 沒有產生輸出檔案。")
+
+                raise RuntimeError(
+                    "Microsoft Office 沒有產生輸出檔案。"
+                )
 
             return str(output_path)
 
         finally:
+
+            if word is not None:
+                try:
+                    word.Quit()
+                except Exception:
+                    pass
+
+            if powerpoint is not None:
+                try:
+                    powerpoint.Quit()
+                except Exception:
+                    pass
+
+            if excel is not None:
+                try:
+                    excel.Quit()
+                except Exception:
+                    pass
+
             try:
                 pythoncom.CoUninitialize()
             except Exception:
@@ -359,32 +619,82 @@ class TurnDocConverter:
     # 通用文件轉換
     # =========================================================
 
-    def _convert_file(self, input_path, output_format):
+    def _convert_file(
+        self,
+        input_path,
+        output_format
+    ):
+
         input_path = Path(input_path)
 
-        # Windows + Microsoft Office
-        if self.office_available and os.name == "nt":
+        # =====================================================
+        # 1. Microsoft Office 優先
+        # =====================================================
+
+        if (
+            os.name == "nt"
+            and self.office_available
+        ):
+
             try:
+
+                print(
+                    "[TurnDoc] "
+                    "Using Microsoft Office..."
+                )
+
                 return self._convert_with_office(
                     input_path,
                     output_format
                 )
-            except Exception as office_error:
+
+            except Exception as error:
+
                 print(
-                    f"Microsoft Office conversion failed: {office_error}"
+                    "[TurnDoc] "
+                    f"Microsoft Office failed: "
+                    f"{error}"
                 )
 
-        # LibreOffice
+        # =====================================================
+        # 2. LibreOffice 備援
+        # =====================================================
+
         if self.libreoffice_available:
-            return self._convert_with_libreoffice(
-                input_path,
-                output_format
-            )
+
+            try:
+
+                print(
+                    "[TurnDoc] "
+                    "Using LibreOffice..."
+                )
+
+                return self._convert_with_libreoffice(
+                    input_path,
+                    output_format
+                )
+
+            except Exception as error:
+
+                print(
+                    "[TurnDoc] "
+                    f"LibreOffice failed: "
+                    f"{error}"
+                )
+
+                raise RuntimeError(
+                    f"文件轉換失敗。\n\n"
+                    f"{error}"
+                )
+
+        # =====================================================
+        # 3. 都沒有
+        # =====================================================
 
         raise RuntimeError(
-            "找不到可用的轉換引擎！\n\n"
-            "目前環境沒有 Microsoft Office 或 LibreOffice。\n"
-            "如果這是在 Render 上執行，請確認服務環境已安裝 LibreOffice。"
+            "找不到可用的轉換引擎。\n\n"
+            "目前環境沒有 Microsoft Office "
+            "或 LibreOffice。"
         )
 
     # =========================================================
@@ -392,20 +702,31 @@ class TurnDocConverter:
     # =========================================================
 
     def word_to_pdf(self, input_path):
-        return self._convert_file(input_path, "pdf")
+
+        return self._convert_file(
+            input_path,
+            "pdf"
+        )
 
     # =========================================================
     # PDF → Word
     # =========================================================
 
     def pdf_to_word(self, input_path):
+
         if Converter is None:
+
             raise RuntimeError(
-                "找不到 pdf2docx 套件，請確認 requirements.txt 已安裝 pdf2docx。"
+                "找不到 pdf2docx 套件，"
+                "請確認 requirements.txt。"
             )
 
         input_path = Path(input_path)
-        output_path = self._get_output_path(input_path, "docx")
+
+        output_path = self._get_output_path(
+            input_path,
+            "docx"
+        )
 
         if output_path.exists():
             output_path.unlink()
@@ -413,14 +734,29 @@ class TurnDocConverter:
         converter = None
 
         try:
-            converter = Converter(str(input_path))
-            converter.convert(str(output_path))
+
+            converter = Converter(
+                str(input_path)
+            )
+
+            converter.convert(
+                str(output_path)
+            )
+
         finally:
+
             if converter:
-                converter.close()
+
+                try:
+                    converter.close()
+                except Exception:
+                    pass
 
         if not output_path.exists():
-            raise RuntimeError("PDF → Word 轉換失敗。")
+
+            raise RuntimeError(
+                "PDF → Word 轉換失敗。"
+            )
 
         return str(output_path)
 
@@ -429,76 +765,120 @@ class TurnDocConverter:
     # =========================================================
 
     def ppt_to_pdf(self, input_path):
-        return self._convert_file(input_path, "pdf")
+
+        return self._convert_file(
+            input_path,
+            "pdf"
+        )
 
     # =========================================================
     # Excel → PDF
     # =========================================================
 
     def excel_to_pdf(self, input_path):
-        return self._convert_file(input_path, "pdf")
+
+        return self._convert_file(
+            input_path,
+            "pdf"
+        )
 
     # =========================================================
     # PDF → PowerPoint
     # =========================================================
 
     def pdf_to_ppt(self, input_path):
-        input_path = Path(input_path)
-        output_path = self._get_output_path(input_path, "pptx")
 
-        # PDF 不是 LibreOffice Impress 的一般輸入格式，
-        # 因此這裡使用圖片方式建立 PPTX。
-        try:
-            from pdf2image import convert_from_path
-        except ImportError:
-            raise RuntimeError(
-                "缺少 pdf2image，請確認 requirements.txt。"
-            )
+        input_path = Path(input_path)
+
+        output_path = self._get_output_path(
+            input_path,
+            "pptx"
+        )
 
         try:
             from pptx import Presentation
             from pptx.util import Inches
         except ImportError:
+
             raise RuntimeError(
-                "缺少 python-pptx，請確認 requirements.txt。"
+                "缺少 python-pptx，"
+                "請確認 requirements.txt。"
             )
 
-        images = self._pdf_to_pil_images(input_path)
+        images = self._pdf_to_pil_images(
+            input_path
+        )
 
         if not images:
-            raise RuntimeError("PDF 沒有可轉換的頁面。")
 
-        presentation = Presentation()
-        presentation.slide_width = Inches(13.333)
-        presentation.slide_height = Inches(7.5)
-
-        for image in images:
-            temp_image = self.output_dir / (
-                f"ppt_page_{uuid.uuid4().hex}.png"
+            raise RuntimeError(
+                "PDF 沒有可轉換的頁面。"
             )
 
-            try:
-                image.save(temp_image, "PNG")
+        presentation = Presentation()
 
-                slide = presentation.slides.add_slide(
-                    presentation.slide_layouts[6]
+        presentation.slide_width = Inches(
+            13.333
+        )
+
+        presentation.slide_height = Inches(
+            7.5
+        )
+
+        try:
+
+            for image in images:
+
+                temp_image = (
+                    self.output_dir
+                    / f"ppt_page_"
+                    f"{uuid.uuid4().hex}.png"
                 )
 
-                slide.shapes.add_picture(
-                    str(temp_image),
-                    0,
-                    0,
-                    width=presentation.slide_width,
-                    height=presentation.slide_height,
-                )
-
-            finally:
                 try:
-                    temp_image.unlink()
+
+                    image.save(
+                        temp_image,
+                        "PNG"
+                    )
+
+                    slide = (
+                        presentation.slides.add_slide(
+                            presentation.slide_layouts[6]
+                        )
+                    )
+
+                    slide.shapes.add_picture(
+                        str(temp_image),
+                        0,
+                        0,
+                        width=(
+                            presentation.slide_width
+                        ),
+                        height=(
+                            presentation.slide_height
+                        ),
+                    )
+
+                finally:
+
+                    try:
+                        temp_image.unlink()
+                    except Exception:
+                        pass
+
+            presentation.save(
+                str(output_path)
+            )
+
+        finally:
+
+            for image in images:
+
+                try:
+                    image.close()
                 except Exception:
                     pass
-
-        presentation.save(output_path)
 
         return str(output_path)
 
@@ -507,44 +887,68 @@ class TurnDocConverter:
     # =========================================================
 
     def pdf_to_excel(self, input_path):
+
         try:
             import pdfplumber
         except ImportError:
+
             raise RuntimeError(
-                "缺少 pdfplumber，請確認 requirements.txt。"
+                "缺少 pdfplumber，"
+                "請確認 requirements.txt。"
             )
 
         try:
             from openpyxl import Workbook
         except ImportError:
+
             raise RuntimeError(
-                "缺少 openpyxl，請確認 requirements.txt。"
+                "缺少 openpyxl，"
+                "請確認 requirements.txt。"
             )
 
         input_path = Path(input_path)
-        output_path = self._get_output_path(input_path, "xlsx")
+
+        output_path = self._get_output_path(
+            input_path,
+            "xlsx"
+        )
 
         workbook = Workbook()
+
         worksheet = workbook.active
         worksheet.title = "PDF"
 
         row_number = 1
 
-        with pdfplumber.open(str(input_path)) as pdf:
+        with pdfplumber.open(
+            str(input_path)
+        ) as pdf:
+
             for page in pdf.pages:
-                tables = page.extract_tables()
+
+                tables = (
+                    page.extract_tables()
+                )
 
                 if tables:
+
                     for table in tables:
+
                         for row in table:
+
                             if row:
-                                for col_number, value in enumerate(
+
+                                for (
+                                    column_number,
+                                    value
+                                ) in enumerate(
                                     row,
                                     start=1
                                 ):
+
                                     worksheet.cell(
                                         row=row_number,
-                                        column=col_number,
+                                        column=column_number,
                                         value=value
                                     )
 
@@ -553,18 +957,26 @@ class TurnDocConverter:
                         row_number += 1
 
                 else:
+
                     text = page.extract_text()
 
                     if text:
-                        for line in text.splitlines():
+
+                        for line in (
+                            text.splitlines()
+                        ):
+
                             worksheet.cell(
                                 row=row_number,
                                 column=1,
                                 value=line
                             )
+
                             row_number += 1
 
-        workbook.save(output_path)
+        workbook.save(
+            str(output_path)
+        )
 
         return str(output_path)
 
@@ -573,22 +985,34 @@ class TurnDocConverter:
     # =========================================================
 
     def merge_pdfs(self, input_paths):
-        if not input_paths:
-            raise RuntimeError("沒有 PDF 可以合併。")
 
-        output_path = self.output_dir / (
-            f"merged_{uuid.uuid4().hex[:8]}.pdf"
+        if not input_paths:
+
+            raise RuntimeError(
+                "沒有 PDF 可以合併。"
+            )
+
+        output_path = (
+            self.output_dir
+            / f"merged_"
+            f"{uuid.uuid4().hex[:8]}.pdf"
         )
 
         merger = PdfMerger()
 
         try:
-            for path in input_paths:
-                merger.append(str(path))
 
-            merger.write(str(output_path))
+            for path in input_paths:
+                merger.append(
+                    str(path)
+                )
+
+            merger.write(
+                str(output_path)
+            )
 
         finally:
+
             merger.close()
 
         return str(output_path)
@@ -597,16 +1021,26 @@ class TurnDocConverter:
     # PDF 壓縮
     # =========================================================
 
-    def compress_pdf(self, input_path, quality="medium"):
+    def compress_pdf(
+        self,
+        input_path,
+        quality="medium"
+    ):
+
         input_path = Path(input_path)
-        output_path = self._get_output_path(
-            input_path,
-            "compressed.pdf"
+
+        output_path = (
+            self.output_dir
+            / f"{input_path.stem}."
+            f"compressed.pdf"
         )
 
-        ghostscript = self._find_ghostscript()
+        ghostscript = (
+            self._find_ghostscript()
+        )
 
         if ghostscript:
+
             quality_map = {
                 "low": "/screen",
                 "medium": "/ebook",
@@ -638,22 +1072,36 @@ class TurnDocConverter:
                 timeout=180,
             )
 
-            if result.returncode == 0 and output_path.exists():
+            if (
+                result.returncode == 0
+                and output_path.exists()
+            ):
+
                 return str(output_path)
 
-        # 沒有 Ghostscript 時使用 PyPDF2 重寫 PDF
-        reader = PdfReader(str(input_path))
+        # 沒有 Ghostscript
+        # 使用 PyPDF2 重寫 PDF
+
+        reader = PdfReader(
+            str(input_path)
+        )
+
         writer = PdfWriter()
 
         for page in reader.pages:
             writer.add_page(page)
 
-        with open(output_path, "wb") as file:
+        with open(
+            output_path,
+            "wb"
+        ) as file:
+
             writer.write(file)
 
         return str(output_path)
 
     def _find_ghostscript(self):
+
         commands = [
             "gs",
             "gswin64c",
@@ -661,7 +1109,10 @@ class TurnDocConverter:
         ]
 
         for command in commands:
-            found = shutil.which(command)
+
+            found = shutil.which(
+                command
+            )
 
             if found:
                 return found
@@ -671,10 +1122,11 @@ class TurnDocConverter:
             r"C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe",
         ]
 
-        import glob
-
         for pattern in windows_paths:
-            matches = glob.glob(pattern)
+
+            matches = glob.glob(
+                pattern
+            )
 
             if matches:
                 return matches[-1]
@@ -682,17 +1134,33 @@ class TurnDocConverter:
         return None
 
     # =========================================================
-    # PDF → 圖片
+    # Poppler
     # =========================================================
 
     def _find_poppler_path(self):
-        # Linux / Render：優先使用 PATH
+
+        # -------------------------------------------------
+        # Linux / Render
+        # -------------------------------------------------
+
         if os.name != "nt":
-            if shutil.which("pdftoppm"):
+
+            # Linux 直接使用 PATH
+            if shutil.which(
+                "pdftoppm"
+            ):
+
                 return None
+
             return None
 
-        base_dir = Path(__file__).resolve().parent
+        # -------------------------------------------------
+        # Windows
+        # -------------------------------------------------
+
+        base_dir = (
+            Path(__file__).resolve().parent
+        )
 
         candidates = [
             base_dir / "poppler" / "bin",
@@ -702,79 +1170,142 @@ class TurnDocConverter:
         ]
 
         for path in candidates:
-            if (path / "pdftoppm.exe").exists():
-                return str(path)
 
-        if shutil.which("pdftoppm"):
-            return None
+            if (
+                path / "pdftoppm.exe"
+            ).exists():
+
+                return str(path)
 
         return None
 
-    def _pdf_to_pil_images(self, input_path):
+    # =========================================================
+    # PDF → PIL Image
+    # =========================================================
+
+    def _pdf_to_pil_images(
+        self,
+        input_path
+    ):
+
         try:
-            from pdf2image import convert_from_path
+            from pdf2image import (
+                convert_from_path
+            )
         except ImportError:
+
             raise RuntimeError(
-                "缺少 pdf2image，請確認 requirements.txt 已安裝。"
+                "缺少 pdf2image，"
+                "請確認 requirements.txt。"
             )
 
-        poppler_path = self._find_poppler_path()
+        poppler_path = (
+            self._find_poppler_path()
+        )
 
         try:
+
             if poppler_path:
+
                 return convert_from_path(
                     str(input_path),
                     poppler_path=poppler_path
                 )
 
-            return convert_from_path(str(input_path))
+            # Linux / Render
+            return convert_from_path(
+                str(input_path)
+            )
 
         except Exception as error:
+
             raise RuntimeError(
                 "PDF → 圖片失敗。\n\n"
                 "系統需要 Poppler / pdftoppm。\n"
                 f"{error}"
             )
 
+    # =========================================================
+    # PDF → 圖片
+    # =========================================================
+
     def pdf_to_images(
         self,
         input_path,
         output_format="png"
     ):
+
         input_path = Path(input_path)
 
-        images = self._pdf_to_pil_images(input_path)
+        images = (
+            self._pdf_to_pil_images(
+                input_path
+            )
+        )
 
         output_files = []
 
-        output_format = output_format.lower()
+        output_format = (
+            output_format.lower()
+        )
 
-        if output_format not in ["png", "jpg", "jpeg", "webp"]:
+        if output_format not in (
+            "png",
+            "jpg",
+            "jpeg",
+            "webp",
+        ):
+
             output_format = "png"
 
-        for index, image in enumerate(images, start=1):
-            extension = "jpg" if output_format == "jpeg" else output_format
+        for index, image in enumerate(
+            images,
+            start=1
+        ):
 
-            output_path = self.output_dir / (
-                f"{input_path.stem}_{index}.{extension}"
+            extension = (
+                "jpg"
+                if output_format == "jpeg"
+                else output_format
             )
 
-            if extension in ["jpg", "jpeg"]:
-                if image.mode in ["RGBA", "LA", "P"]:
-                    image = image.convert("RGB")
+            output_path = (
+                self.output_dir
+                / f"{input_path.stem}_"
+                f"{index}.{extension}"
+            )
+
+            if extension in (
+                "jpg",
+                "jpeg",
+            ):
+
+                if image.mode in (
+                    "RGBA",
+                    "LA",
+                    "P",
+                ):
+
+                    image = image.convert(
+                        "RGB"
+                    )
 
                 image.save(
                     output_path,
                     "JPEG",
                     quality=95
                 )
+
             else:
+
                 image.save(
                     output_path,
                     output_format.upper()
                 )
 
-            output_files.append(str(output_path))
+            output_files.append(
+                str(output_path)
+            )
 
         return output_files
 
@@ -782,43 +1313,64 @@ class TurnDocConverter:
     # 圖片 → PDF
     # =========================================================
 
-    def images_to_pdf(self, input_paths):
-        if not input_paths:
-            raise RuntimeError("沒有圖片可以轉換。")
+    def images_to_pdf(
+        self,
+        input_paths
+    ):
 
-        output_path = self.output_dir / (
-            f"images_{uuid.uuid4().hex[:8]}.pdf"
+        if not input_paths:
+
+            raise RuntimeError(
+                "沒有圖片可以轉換。"
+            )
+
+        output_path = (
+            self.output_dir
+            / f"images_"
+            f"{uuid.uuid4().hex[:8]}.pdf"
         )
 
         images = []
 
-        for path in input_paths:
-            image = Image.open(path)
+        try:
 
-            if image.mode != "RGB":
-                image = image.convert("RGB")
+            for path in input_paths:
 
-            images.append(image)
+                image = Image.open(path)
 
-        if not images:
-            raise RuntimeError("沒有有效圖片。")
+                if image.mode != "RGB":
 
-        first = images[0]
-        remaining = images[1:]
+                    image = image.convert(
+                        "RGB"
+                    )
 
-        first.save(
-            output_path,
-            "PDF",
-            resolution=100.0,
-            save_all=True,
-            append_images=remaining,
-        )
+                images.append(image)
 
-        for image in images:
-            try:
-                image.close()
-            except Exception:
-                pass
+            if not images:
+
+                raise RuntimeError(
+                    "沒有有效圖片。"
+                )
+
+            first = images[0]
+            remaining = images[1:]
+
+            first.save(
+                output_path,
+                "PDF",
+                resolution=100.0,
+                save_all=True,
+                append_images=remaining,
+            )
+
+        finally:
+
+            for image in images:
+
+                try:
+                    image.close()
+                except Exception:
+                    pass
 
         return str(output_path)
 
@@ -831,9 +1383,12 @@ class TurnDocConverter:
         input_path,
         output_format
     ):
+
         input_path = Path(input_path)
 
-        output_format = output_format.lower()
+        output_format = (
+            output_format.lower()
+        )
 
         if output_format == "jpeg":
             output_format = "jpg"
@@ -849,21 +1404,39 @@ class TurnDocConverter:
         ]
 
         if output_format not in supported:
+
             raise RuntimeError(
-                f"不支援的圖片格式：{output_format}"
+                f"不支援的圖片格式："
+                f"{output_format}"
             )
 
-        output_path = self._get_output_path(
-            input_path,
-            output_format
+        output_path = (
+            self._get_output_path(
+                input_path,
+                output_format
+            )
         )
 
-        image = Image.open(input_path)
+        image = Image.open(
+            input_path
+        )
 
         try:
-            if output_format in ["jpg", "jpeg"]:
-                if image.mode in ["RGBA", "LA", "P"]:
-                    image = image.convert("RGB")
+
+            if output_format in (
+                "jpg",
+                "jpeg",
+            ):
+
+                if image.mode in (
+                    "RGBA",
+                    "LA",
+                    "P",
+                ):
+
+                    image = image.convert(
+                        "RGB"
+                    )
 
                 image.save(
                     output_path,
@@ -872,12 +1445,14 @@ class TurnDocConverter:
                 )
 
             else:
+
                 image.save(
                     output_path,
                     output_format.upper()
                 )
 
         finally:
+
             image.close()
 
         return str(output_path)
@@ -892,6 +1467,7 @@ class TurnDocConverter:
         quality="medium",
         output_format=None
     ):
+
         input_path = Path(input_path)
 
         quality_map = {
@@ -905,27 +1481,56 @@ class TurnDocConverter:
             70
         )
 
-        if not output_format or output_format == "original":
-            extension = input_path.suffix.lower().lstrip(".")
+        if (
+            not output_format
+            or output_format == "original"
+        ):
+
+            extension = (
+                input_path.suffix
+                .lower()
+                .lstrip(".")
+            )
 
             if extension == "jpeg":
                 extension = "jpg"
+
         else:
-            extension = output_format.lower()
+
+            extension = (
+                output_format
+                .lower()
+            )
 
         if extension == "jpeg":
             extension = "jpg"
 
-        output_path = self.output_dir / (
-            f"{input_path.stem}.compressed.{extension}"
+        output_path = (
+            self.output_dir
+            / f"{input_path.stem}."
+            f"compressed.{extension}"
         )
 
-        image = Image.open(input_path)
+        image = Image.open(
+            input_path
+        )
 
         try:
-            if extension in ["jpg", "jpeg"]:
-                if image.mode in ["RGBA", "LA", "P"]:
-                    image = image.convert("RGB")
+
+            if extension in (
+                "jpg",
+                "jpeg",
+            ):
+
+                if image.mode in (
+                    "RGBA",
+                    "LA",
+                    "P",
+                ):
+
+                    image = image.convert(
+                        "RGB"
+                    )
 
                 image.save(
                     output_path,
@@ -935,6 +1540,7 @@ class TurnDocConverter:
                 )
 
             elif extension == "webp":
+
                 image.save(
                     output_path,
                     "WEBP",
@@ -943,6 +1549,7 @@ class TurnDocConverter:
                 )
 
             elif extension == "png":
+
                 image.save(
                     output_path,
                     "PNG",
@@ -950,9 +1557,13 @@ class TurnDocConverter:
                 )
 
             else:
-                image.save(output_path)
+
+                image.save(
+                    output_path
+                )
 
         finally:
+
             image.close()
 
         return str(output_path)
@@ -966,54 +1577,85 @@ class TurnDocConverter:
         input_path,
         output_format="png"
     ):
+
         input_path = Path(input_path)
 
-        image = Image.open(input_path)
+        image = Image.open(
+            input_path
+        )
 
         output_files = []
 
         try:
+
             frame_count = getattr(
                 image,
                 "n_frames",
                 1
             )
 
-            output_format = output_format.lower()
+            output_format = (
+                output_format.lower()
+            )
 
             if output_format == "jpeg":
                 output_format = "jpg"
 
-            for index in range(frame_count):
+            for index in range(
+                frame_count
+            ):
+
                 image.seek(index)
 
-                frame = image.convert("RGBA")
-
-                extension = output_format
-
-                output_path = self.output_dir / (
-                    f"{input_path.stem}_frame_{index + 1}.{extension}"
+                frame = image.convert(
+                    "RGBA"
                 )
 
-                if extension in ["jpg", "jpeg"]:
-                    frame = frame.convert("RGB")
+                extension = (
+                    output_format
+                )
 
-                    frame.save(
-                        output_path,
-                        "JPEG",
-                        quality=95
+                output_path = (
+                    self.output_dir
+                    / f"{input_path.stem}_"
+                    f"frame_{index + 1}."
+                    f"{extension}"
+                )
+
+                try:
+
+                    if extension in (
+                        "jpg",
+                        "jpeg",
+                    ):
+
+                        frame = frame.convert(
+                            "RGB"
+                        )
+
+                        frame.save(
+                            output_path,
+                            "JPEG",
+                            quality=95
+                        )
+
+                    else:
+
+                        frame.save(
+                            output_path,
+                            output_format.upper()
+                        )
+
+                    output_files.append(
+                        str(output_path)
                     )
-                else:
-                    frame.save(
-                        output_path,
-                        output_format.upper()
-                    )
 
-                frame.close()
+                finally:
 
-                output_files.append(str(output_path))
+                    frame.close()
 
         finally:
+
             image.close()
 
         return output_files
